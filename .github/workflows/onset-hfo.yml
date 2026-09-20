@@ -1,0 +1,42 @@
+# Lint and test the Onset-HFO prototype.
+#
+# Everything here runs offline: the test suite uses the synthetic recording and
+# a local mock model server, so CI never downloads data or model weights.
+name: onset-hfo
+
+on:
+  push:
+    paths: ["onset-hfo/**", ".github/workflows/onset-hfo.yml"]
+  pull_request:
+    paths: ["onset-hfo/**", ".github/workflows/onset-hfo.yml"]
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: onset-hfo
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+      - name: Lint
+        run: ruff check .
+      - name: Test
+        run: pytest -q
+      - name: Smoke-test the CLI end to end (synthetic data, no network)
+        run: |
+          python -m onset_hfo.cli run --synthetic --duration 30 --out artifacts/ci
+          python -m onset_agent.cli --results artifacts/ci/sim-01_simulated_run-01 \
+            --question "which channels have the highest ripple rate?"

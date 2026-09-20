@@ -1,0 +1,180 @@
+"""Preprocessing: from a raw recording to the channels a detector sees.
+
+Four steps, in this order, each of which is logged into ``Prepared.steps`` so
+that a report can state exactly what was done to the signal:
+
+1. **Channel selection** -- keep intracranial data channels (ECoG/SEEG/EEG),
+   drop DC/trigger/ECG/misc channels and everything the dataset flagged ``bad``.
+2. **High-pass** at 1 Hz to remove drift.
+3. **Notch** at the mains frequency and its harmonics. Narrow notches
+   (2 Hz wide) are used on purpose: harmonics at 180/240 Hz sit inside the
+   ripple band, and a wide notch would carve a hole in the signal we are
+   trying to measure.
+4. **Bipolar montage** -- subtract neighbouring contacts on the same
+   electrode. This is standard for HFO work: a common reference shares its
+   noise with every channel and produces HFOs that appear everywhere at once.
+
+Caveat worth knowing (and stated in the report): on a rectangular grid,
+"neighbouring by number" (G8 - G9) is not always neighbouring in space,
+because numbering wraps at the end of a row. For depth electrodes and strips
+the numbering is spatially ordered, which is the case that matters most here.
+"""
+
+from __future__ import annotations
+
+import re
+import warnings
+from dataclasses import dataclass, field
+
+import numpy as np
+
+from onset_hfo.config import PreprocessConfig
+from onset_hfo.datasets import Recording
+
+__all__ = ["Prepared", "prepare", "bipolar_pairs"]
+
+_CONTACT_RE = re.compile(r"^([A-Za-z]+[A-Za-z']*?)(\d{1,3})$")
+#: Channel name prefixes that are never intracranial recordings in this dataset.
+_NON_BRAIN = ("DC", "EKG", "ECG", "EMG", "EOG", "TRIG", "STIM", "REF", "EVENT", "MARK")
+
+
+@dataclass
+class Prepared:
+    """Preprocessed signals plus the story of how they were produced."""
+
+    data: np.ndarray              #: (n_channels, n_times), microvolts
+    ch_names: list[str]           #: bipolar pair names ("G1-G2") or contact names
+    sfreq: float
+    t_offset: float               #: seconds; add to a local time to get file time
+    montage: str                  #: "bipolar" or "monopolar"
+    pairs: list[tuple[str, str]] = field(default_factory=list)
+    steps: list[str] = field(default_factory=list)
+    recording: Recording | None = None
+
+    @property
+    def duration(self) -> float:
+        return self.data.shape[1] / self.sfreq
+
+    @property
+    def n_channels(self) -> int:
+        return self.data.shape[0]
+
+    def contacts_of(self, ch: str) -> list[str]:
+        """The physical contact(s) a (possibly bipolar) channel is built from."""
+        if self.montage == "bipolar" and ch in self.ch_names:
+            a, b = self.pairs[self.ch_names.index(ch)]
+            return [a, b]
+        return [ch]
+
+    def index(self, ch: str) -> int:
+        return self.ch_names.index(ch)
+
+    def segment(self, ch: str, t0: float, t1: float, absolute: bool = True) -> np.ndarray:
+        """Signal for one channel between two times (default: file times)."""
+        if absolute:
+            t0, t1 = t0 - self.t_offset, t1 - self.t_offset
+        i0 = max(0, int(round(t0 * self.sfreq)))
+        i1 = min(self.data.shape[1], int(round(t1 * self.sfreq)))
+        return self.data[self.index(ch), i0:i1]
+
+
+def _is_brain_channel(name: str, ch_type: str) -> bool:
+    if ch_type not in ("ecog", "seeg", "eeg"):
+        return False
+    upper = name.upper()
+    return not any(upper.startswith(p) for p in _NON_BRAIN)
+
+
+def bipolar_pairs(ch_names: list[str], exclude: set[str] | None = None) -> list[tuple[str, str]]:
+    """Consecutive contacts on the same electrode, e.g. ``("AD1", "AD2")``.
+
+    Both contacts must be present and neither may be excluded, so a bad
+    contact removes the two pairs it would have formed rather than silently
+    bridging a gap (AD1-AD3 would mix two distances and is never produced).
+    """
+    exclude = exclude or set()
+    by_lead: dict[str, dict[int, str]] = {}
+    for name in ch_names:
+        m = _CONTACT_RE.match(name)
+        if not m:
+            continue
+        by_lead.setdefault(m.group(1), {})[int(m.group(2))] = name
+    pairs: list[tuple[str, str]] = []
+    for lead in sorted(by_lead):
+        numbers = sorted(by_lead[lead])
+        for n in numbers:
+            if n + 1 in by_lead[lead]:
+                a, b = by_lead[lead][n], by_lead[lead][n + 1]
+                if a not in exclude and b not in exclude:
+                    pairs.append((a, b))
+    return pairs
+
+
+def prepare(rec: Recording, cfg: PreprocessConfig | None = None, verbose: bool = True) -> Prepared:
+    """Run the four preprocessing steps and return the array a detector reads.
+
+    The returned data is in **microvolts**, because every threshold and plot in
+    this project is expressed in µV and silent unit changes are how analyses go
+    wrong.
+    """
+    cfg = cfg or PreprocessConfig()
+    raw = rec.raw.copy()
+    steps: list[str] = []
+
+    # 1. channel selection ------------------------------------------------
+    types = raw.get_channel_types()
+    keep = [n for n, t in zip(raw.ch_names, types, strict=False) if _is_brain_channel(n, t)]
+    dropped_type = [n for n in raw.ch_names if n not in keep]
+    if not keep:
+        raise ValueError("No intracranial data channels found in this recording")
+    raw.pick(keep)
+    steps.append(f"kept {len(keep)} intracranial channels; dropped {len(dropped_type)} "
+                 f"non-brain channels (DC/trigger/ECG/misc)")
+
+    bads = [b for b in rec.bads if b in raw.ch_names]
+    if cfg.drop_bads and bads:
+        raw.drop_channels(bads)
+        steps.append(f"dropped {len(bads)} channels flagged bad by the dataset: {', '.join(sorted(bads))}")
+
+    # 2/3. filtering ------------------------------------------------------
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        if cfg.highpass:
+            raw.filter(l_freq=cfg.highpass, h_freq=None, fir_design="firwin",
+                       phase="zero", verbose="ERROR")
+            steps.append(f"high-pass {cfg.highpass:g} Hz (zero-phase FIR)")
+        if cfg.notch:
+            nyq = raw.info["sfreq"] / 2.0
+            freqs = [f for f in np.arange(cfg.line_freq, nyq, cfg.line_freq) if f < 0.9 * nyq]
+            if freqs:
+                raw.notch_filter(freqs=freqs, notch_widths=2.0, fir_design="firwin",
+                                 phase="zero", verbose="ERROR")
+                steps.append(f"notch {cfg.line_freq:g} Hz + harmonics "
+                             f"({', '.join(f'{f:g}' for f in freqs)} Hz, 2 Hz wide)")
+
+    data = raw.get_data(picks="all") * 1e6  # volts -> microvolts
+    names = list(raw.ch_names)
+
+    # 4. montage ----------------------------------------------------------
+    pairs: list[tuple[str, str]] = []
+    if cfg.bipolar:
+        pairs = bipolar_pairs(names, exclude=set())
+        if not pairs:
+            steps.append("bipolar montage requested but no consecutive contact pairs were found; "
+                         "kept the original (monopolar) channels")
+        else:
+            idx = {n: i for i, n in enumerate(names)}
+            data = np.stack([data[idx[a]] - data[idx[b]] for a, b in pairs])
+            names = [f"{a}-{b}" for a, b in pairs]
+            steps.append(f"bipolar montage: {len(pairs)} pairs of neighbouring contacts")
+    montage = "bipolar" if pairs else "monopolar"
+
+    prepared = Prepared(data=np.ascontiguousarray(data, dtype=np.float64), ch_names=names,
+                        sfreq=float(raw.info["sfreq"]), t_offset=rec.t_offset, montage=montage,
+                        pairs=pairs, steps=steps, recording=rec)
+    if verbose:
+        print(f"[onset-hfo] preprocessed: {prepared.n_channels} {montage} channels, "
+              f"{prepared.duration:.1f} s @ {prepared.sfreq:g} Hz")
+        for s in steps:
+            print(f"[onset-hfo]   - {s}")
+    return prepared

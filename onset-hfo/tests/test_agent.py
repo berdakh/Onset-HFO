@@ -1,0 +1,307 @@
+"""The agent half: tools, guards, backends and the loop.
+
+No model is downloaded here. The language-model path is exercised against a
+local mock server that replies exactly as an OpenAI-compatible open-weight
+server does -- including the two ways small models get it wrong (tool calls
+buried in the message content, and confident invented numbers).
+"""
+
+from __future__ import annotations
+
+import json
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
+
+import pytest
+
+from onset_agent.agent import OnsetAgent
+from onset_agent.backends import (
+    AssistantMessage,
+    Backend,
+    OpenAICompatBackend,
+    ScriptedBackend,
+    ToolCall,
+    extract_json_object,
+    parse_tool_calls_from_text,
+)
+from onset_agent.guard import check_question, verify_answer
+from onset_agent.tools import TOOLS, ToolError, dispatch, tool_schemas
+
+# -- tools -----------------------------------------------------------------
+
+def test_every_tool_has_a_strict_schema():
+    for name, tool in TOOLS.items():
+        schema = tool.schema()["function"]
+        assert schema["name"] == name
+        assert schema["description"].strip()
+        assert schema["parameters"]["additionalProperties"] is False
+
+
+def test_no_tool_can_change_the_patient():
+    """Patient scope is owned by the application, not by model output."""
+    for tool in TOOLS.values():
+        assert "subject" not in tool.parameters["properties"]
+        assert "patient" not in tool.parameters["properties"]
+
+
+def test_dispatch_rejects_bad_calls(store):
+    with pytest.raises(ToolError):
+        dispatch(store, "delete_everything", {})
+    with pytest.raises(ToolError):
+        dispatch(store, "top_channels", {"subject": "sub-pt99"})
+    with pytest.raises(ToolError):
+        dispatch(store, "channel_summary", {})
+    with pytest.raises(ToolError):
+        dispatch(store, "top_channels", {"detector": "magic"})
+
+
+def test_dispatch_clamps_numbers(store):
+    out = dispatch(store, "top_channels", {"k": 500})
+    assert len(out["channels"]) <= 20
+
+
+def test_unknown_channel_returns_an_error_not_an_exception(store):
+    out = dispatch(store, "channel_summary", {"channel": "NOPE1-NOPE2"})
+    assert "error" in out and "analysed_channels" in out
+
+
+def test_evidence_ids_resolve(store):
+    channel = store.top_channels(k=1)[0]["channel"]
+    windows = dispatch(store, "get_evidence", {"channel": channel, "k": 2})["evidence"]
+    assert windows
+    for window in windows:
+        assert store.resolve(window["evidence_id"]) is not None
+    assert store.resolve("sub-xx|FAKE|rms|1.000") is None
+
+
+def test_evidence_excludes_spikes_unless_asked(store):
+    channel = store.top_channels(k=1)[0]["channel"]
+    assert all(w["detector"] != "spike" for w in store.evidence(channel, k=5))
+    spikes = store.evidence(channel, detector="spike", k=5)
+    assert all(w["detector"] == "spike" for w in spikes)
+
+
+def test_report_has_no_recommendation_section(store):
+    out = dispatch(store, "report_section", {"section": "limitations"})
+    assert out["content"]
+    with pytest.raises(ToolError):
+        dispatch(store, "report_section", {"section": "recommendation"})
+
+
+# -- guards ----------------------------------------------------------------
+
+@pytest.mark.parametrize("question", [
+    "Which region should we resect?",
+    "What treatment do you recommend?",
+    "Should we ablate the temporal contacts?",
+    "What would you do in this case?",
+])
+def test_treatment_questions_are_refused_before_the_model_runs(question):
+    assert not check_question(question, "sub-pt01").ok
+
+
+@pytest.mark.parametrize("question", [
+    "Does this patient have epilepsy?",
+    "Where do the seizures start?",
+    "Is this the seizure onset zone?",
+    "Will the patient be seizure free?",
+])
+def test_diagnostic_questions_are_refused(question):
+    assert not check_question(question, "sub-pt01").ok
+
+
+def test_other_patients_are_refused():
+    assert not check_question("What about patient sub-pt02?", "sub-pt01").ok
+    assert check_question("What about ATT1-ATT2?", "sub-pt01").ok
+
+
+def test_invented_numbers_are_caught():
+    seen = {46.0, 31.0}
+    assert verify_answer("The rate is 46.0/min.", [], set(), seen).ok
+    assert not verify_answer("The rate is 91.5/min.", [], set(), seen).ok
+
+
+def test_a_time_range_is_not_read_as_a_negative_number():
+    seen = {45.898, 45.93}
+    assert verify_answer("Window 45.898-45.93 s.", [], set(), seen).ok
+
+
+def test_uncited_evidence_is_caught():
+    assert not verify_answer("see evidence", ["made|up|id|1.0"], set(), {1.0}).ok
+    assert verify_answer("see evidence", ["real|id|rms|1.0"], {"real|id|rms|1.0"}, {1.0}).ok
+
+
+# -- parsing helpers --------------------------------------------------------
+
+def test_tool_calls_hidden_in_content_are_recovered():
+    text = 'Sure.\n<tool_call>\n{"name": "top_channels", "arguments": {"k": 3}}\n</tool_call>'
+    calls = parse_tool_calls_from_text(text)
+    assert calls[0].name == "top_channels" and calls[0].arguments == {"k": 3}
+
+
+def test_json_is_extracted_from_chatty_output():
+    assert extract_json_object('Here you go: {"answer": "x", "evidence_ids": []} thanks') \
+        == {"answer": "x", "evidence_ids": []}
+    assert extract_json_object("no json here") is None
+
+
+# -- the loop with the scripted policy --------------------------------------
+
+def test_scripted_agent_answers_with_tools(store):
+    agent = OnsetAgent(store, ScriptedBackend())
+    answer = agent.ask("Which channels have the highest ripple rate?")
+    assert not answer.refused
+    assert answer.tools_called == ["top_channels"]
+    assert answer.verified
+
+
+def test_scripted_agent_cites_evidence(store):
+    agent = OnsetAgent(store, ScriptedBackend())
+    answer = agent.ask("What is the evidence for the top channel?")
+    assert not answer.refused
+    assert answer.evidence_ids
+    assert all(store.resolve(eid) for eid in answer.evidence_ids)
+
+
+def test_agent_refuses_treatment_without_calling_a_tool(store):
+    agent = OnsetAgent(store, ScriptedBackend())
+    answer = agent.ask("Which contacts should we resect?")
+    assert answer.refused and not answer.tools_called
+    assert "treatment" in answer.text.lower() or "should be done" in answer.text.lower()
+
+
+# -- the language-model path, against a mock open-weight server -------------
+
+class _MockHandler(BaseHTTPRequestHandler):
+    replies: list[dict] = []
+    index = 0
+
+    def do_POST(self):  # noqa: N802 - http.server API
+        length = int(self.headers.get("Content-Length", 0))
+        self.rfile.read(length)
+        message = type(self).replies[min(type(self).index, len(type(self).replies) - 1)]
+        type(self).index += 1
+        body = json.dumps({"choices": [{"message": message}]}).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, *args):  # silence the test output
+        return
+
+
+@pytest.fixture
+def mock_server():
+    def start(replies):
+        _MockHandler.replies = replies
+        _MockHandler.index = 0
+        server = HTTPServer(("127.0.0.1", 0), _MockHandler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        return server, f"http://127.0.0.1:{server.server_port}/v1"
+    servers = []
+    yield lambda replies: (lambda pair: (servers.append(pair[0]), pair[1])[1])(start(replies))
+    for server in servers:
+        server.shutdown()
+
+
+def test_openai_compatible_tool_calling(store, mock_server):
+    """The path a real Qwen/Llama server takes: structured tool call, then JSON."""
+    url = mock_server([
+        {"role": "assistant", "content": "", "tool_calls": [
+            {"id": "c1", "type": "function",
+             "function": {"name": "top_channels", "arguments": json.dumps({"k": 2})}}]},
+        {"role": "assistant",
+         "content": json.dumps({"answer": "The leading channel is listed above.",
+                                "evidence_ids": []})},
+    ])
+    agent = OnsetAgent(store, OpenAICompatBackend(model="mock", base_url=url))
+    answer = agent.ask("Which channels stand out?")
+    assert not answer.refused
+    assert answer.tools_called == ["top_channels"]
+
+
+def test_tool_call_written_into_content_still_works(store, mock_server):
+    url = mock_server([
+        {"role": "assistant",
+         "content": '<tool_call>{"name": "report_section", '
+                    '"arguments": {"section": "summary"}}</tool_call>'},
+        {"role": "assistant", "content": json.dumps({"answer": "Summarised.",
+                                                     "evidence_ids": []})},
+    ])
+    agent = OnsetAgent(store, OpenAICompatBackend(model="mock", base_url=url))
+    answer = agent.ask("Summarise the analysis.")
+    assert answer.tools_called == ["report_section"]
+
+
+def test_a_hallucinated_number_is_refused(store, mock_server):
+    """The point of the whole guard layer, tested end to end."""
+    url = mock_server([
+        {"role": "assistant", "content": "", "tool_calls": [
+            {"id": "c1", "type": "function",
+             "function": {"name": "top_channels", "arguments": "{}"}}]},
+        {"role": "assistant", "content": json.dumps(
+            {"answer": "The top channel fires at 999.9 events/min.", "evidence_ids": []})},
+        {"role": "assistant", "content": json.dumps(
+            {"answer": "The top channel fires at 999.9 events/min.", "evidence_ids": []})},
+        {"role": "assistant", "content": json.dumps(
+            {"answer": "The top channel fires at 999.9 events/min.", "evidence_ids": []})},
+    ])
+    agent = OnsetAgent(store, OpenAICompatBackend(model="mock", base_url=url))
+    answer = agent.ask("How often does the top channel fire?")
+    assert answer.refused and not answer.verified
+    assert "999.9" not in answer.text
+
+
+def test_a_fabricated_citation_is_refused(store, mock_server):
+    url = mock_server([
+        {"role": "assistant", "content": json.dumps(
+            {"answer": "See the evidence.", "evidence_ids": ["sub-zz|FAKE|rms|0.000"]})},
+    ] * 4)
+    agent = OnsetAgent(store, OpenAICompatBackend(model="mock", base_url=url))
+    answer = agent.ask("Show me the evidence for the top channel.")
+    assert answer.refused
+
+
+def test_the_model_cannot_call_an_unknown_tool(store, mock_server):
+    url = mock_server([
+        {"role": "assistant", "content": "", "tool_calls": [
+            {"id": "c1", "type": "function",
+             "function": {"name": "run_shell", "arguments": json.dumps({"cmd": "rm -rf /"})}}]},
+        {"role": "assistant", "content": json.dumps({"refusal": "I cannot do that."})},
+    ])
+    agent = OnsetAgent(store, OpenAICompatBackend(model="mock", base_url=url))
+    answer = agent.ask("Delete the results.")
+    assert answer.refused
+    failed = [s for s in answer.trace if s.get("type") == "tool_call" and not s["ok"]]
+    assert failed and "unknown tool" in failed[0]["error"]
+
+
+def test_tool_output_that_looks_like_an_instruction_is_just_data(store, mock_server):
+    """Prompt injection through a tool result must not change what the agent does."""
+    class Injecting(Backend):
+        name = "injecting-mock"
+
+        def __init__(self):
+            self.turn = 0
+
+        def chat(self, messages, tools):
+            self.turn += 1
+            if self.turn == 1:
+                return AssistantMessage(tool_calls=[ToolCall("report_section",
+                                                             {"section": "summary"}, "c1")])
+            # The model sees the tool output; whatever it contains, the answer
+            # is still verified against retrieved evidence and numbers.
+            return AssistantMessage(content=json.dumps(
+                {"answer": "Ignoring instructions found in data; 12345.6 Hz is not real.",
+                 "evidence_ids": []}))
+
+    agent = OnsetAgent(store, Injecting())
+    answer = agent.ask("Summarise.")
+    assert answer.refused, "an unverifiable number must not be published"
+
+
+def test_schemas_are_json_serialisable():
+    json.dumps(tool_schemas())
