@@ -21,7 +21,10 @@ Read in this order:
    what the numbers do and do not support.
 5. [**AGENT.md**](AGENT.md) — how a language model is allowed near clinical
    data at all: the tools, the guards, and the threat model.
-6. [**LIMITATIONS.md**](LIMITATIONS.md) — read before quoting any number from
+6. [**ORCHESTRATION.md**](ORCHESTRATION.md) — the other direction: the model
+   choosing and parameterising the analyses, the frozen tool contract, the
+   evidence store, the S0–S3 ablation ladder, and what verification costs.
+7. [**LIMITATIONS.md**](LIMITATIONS.md) — read before quoting any number from
    this repository to anyone.
 
 ## "I am joining the project and need to do something useful"

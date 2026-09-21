@@ -7,6 +7,15 @@ to use.
 Each item names the files it touches and roughly what is involved, so someone
 joining can pick one up without a handover meeting.
 
+> **Updated after a survey of what `ds003029` actually contains.** Three
+> entries changed status. Item 2 (outcome as reference standard) is now
+> *partly done*: the archive publishes curated SOZ contacts, not just outcome
+> scores, and `onset_hfo/cohort.py` reads them. Item 3 (electrode geometry) is
+> **not possible on this dataset** — there is no `electrodes.tsv` for any
+> subject. Item 8 (the agent) is largely built; what remains of it is now the
+> cohort run and the falsification tests. See
+> [`ORCHESTRATION.md`](ORCHESTRATION.md) §8 for the current boundary.
+
 ---
 
 ## 1. Interictal recordings — the one that changes the science
@@ -19,39 +28,69 @@ literature at all.
 
 **What.** Find a public interictal iEEG dataset with a high sampling rate
 (candidates: other OpenNeuro iEEG datasets; the Montreal/Zurich HFO datasets
-distributed with `mne-hfo`; institutional data under your own approvals). Add
-a loader beside `fetch_slice` — the `Recording` dataclass is the only contract.
+distributed with `mne-hfo`; SWEC-ETHZ; institutional data under your own
+approvals). Add a loader beside `fetch_slice` — the `Recording` dataclass is
+the only contract.
+
+**Do not be misled by this archive's `task-interictal` files.** There are 25
+of them and all but one are metadata with no signal attached; exactly one
+interictal recording (`sub-umf002`, run 01) ships an `.eeg`. Checking this
+takes one S3 listing and saves a week of building against a dataset that is
+not there.
 
 **Touches.** `onset_hfo/datasets.py`, `docs/DATA.md`.
 
 ---
 
-## 2. Outcome as the reference standard
+## 2. Outcome as the reference standard — *the label layer is done; the cohort run is not*
 
-**Why.** `participants.tsv` in `ds003029` carries Engel and ILAE scores and
-whether a resection happened. That makes one real question answerable: *do
-channels this pipeline ranks highly fall inside the resected volume more often
-in patients who became seizure free?* That is the reference standard the field
-actually uses, and it is sitting in the archive unused.
+**What turned out to be true.** The archive carries more than outcome scores.
+`sourcedata/clinical_data_summary.xlsx` gives **curated clinician SOZ
+contacts** per patient, alongside Engel, ILAE, surgery type and clinical
+centre. `onset_hfo/cohort.py` reads it, reconciles the subject ids, decodes
+the `S`/`F` outcome trap, and falls back to a local CSV or the free-text
+markers — recording which source it used. 32 of the 35 subjects with signals
+have a row, and parsed contact names match `channels.tsv` exactly.
 
-**What.** Join participant outcome to per-channel ranks, restricted to
-subjects where resection information can be recovered. Report by outcome
-group, with confidence intervals and a permutation null. Expect a null result
-on a first pass — and report it.
+**What is still to do — and it is the single highest-value item left.** Run
+the pipeline (and the S0–S3 ladder) across those 32 subjects, not one. That
+gives:
 
-**Touches.** new `onset_hfo/cohort.py`, `docs/EVALUATION.md`.
+* per-rung SOZ localization with confidence intervals instead of one patient's
+  anecdote;
+* **leave-one-site-out generalization** across the four centres (NIH 14, UMMC
+  9, JHH 7, UMF 5) — the cross-site experiment, on public data, needing no
+  local cohort at all;
+* stratification by `seizure_free`, so the trustworthy positives (clinician
+  named it *and* the surgery worked) are scored separately from the ambiguous
+  ones.
+
+Budget roughly 24 MB and 8 s of compute per subject-run. Expect a null result
+on the first pass — §6b of `EVALUATION.md` already reports one on `sub-pt01` —
+and report it.
+
+**Touches.** new `onset_hfo/batch.py`, `docs/EVALUATION.md`. `cohort.py` and
+`onset_agent/scoring.py` already exist.
 
 ---
 
-## 3. Electrode geometry, so "neighbouring" means neighbouring
+## 3. Electrode geometry — *blocked on this dataset; needs a different archive*
 
-**Why.** Bipolar pairs are formed from consecutive contact *numbers*. On a
-grid, numbering wraps at the end of a row, so some pairs join contacts that
-are centimetres apart. Every rate computed on such a pair is suspect.
+**Why it matters.** Bipolar pairs are formed from consecutive contact
+*numbers*. On a grid, numbering wraps at the end of a row, so some pairs join
+contacts that are centimetres apart. Every rate computed on such a pair is
+suspect.
 
-**What.** Read the BIDS `electrodes.tsv` where present, pair by Euclidean
-distance with a maximum, and fall back to numbering when coordinates are
-missing. Say which rule was used in the report's method section.
+**Why it cannot be done here.** `ds003029` publishes **no `electrodes.tsv` for
+any subject**. There are no coordinates in the archive at all. Anything that
+needs geometry — distance-based pairing, distance-to-neighbour features,
+source localisation — requires a different dataset.
+
+**What to do instead.** Write the code against the BIDS `electrodes.tsv`
+schema so it is ready, pair by Euclidean distance with a maximum where
+coordinates exist, fall back to numbering where they do not, and state which
+rule was used in the report's method section. Then validate it on an archive
+that ships coordinates.
 
 **Touches.** `onset_hfo/preprocess.py`, `onset_hfo/datasets.py`, `report.py`.
 
@@ -124,15 +163,30 @@ next step — "compare this patient's ranking to their previous recording" —
 needs multi-analysis tools, and a way to evaluate whether the agent's answers
 are actually *useful* rather than merely verified.
 
-**What.**
-* Tools: rejected events and their reasons; comparison across two stores;
-  a tool that returns the event figure as an image.
-* An agent benchmark: a fixed question set with expected tool calls and
-  expected refusals, scored per model. That turns "Qwen 7B is better than 1.5B
-  at this" from an impression into a number, and it is cheap to build — the
-  scripted backend already defines the shape of a correct trace.
+**What has since been built.** The agent can now *drive* the analysis rather
+than read it: a frozen JSON tool contract with run ids, nine live tools that
+each re-run the real pipeline at parameters the planner chooses, an
+append-only evidence store, the S0–S3 ablation ladder, three stopping rules,
+and two verifiers with a measured delta between them. See
+[`ORCHESTRATION.md`](ORCHESTRATION.md).
 
-**Touches.** `onset_agent/tools.py`, new `onset_agent/benchmark.py`.
+**What remains, in order:**
+
+* **Falsification tests.** Shuffled channel labels; the leading channel
+  removed; a recording with no epileptiform activity. If the agent still
+  produces a confident ranking, that is the result a reviewer will look
+  hardest for — better found in week three than in month six. Three functions
+  over `AnalysisSession`.
+* **A real-model measurement.** Every ladder number published so far comes
+  from the deterministic scripted planner. That is the control, not the
+  result.
+* **The model and quantization ladder.** Qwen3-4B/8B/14B at FP16/8-bit/4-bit,
+  scored on planning quality, tool-call validity, unsupported-claim rate,
+  tokens and wall-clock. Needs a GPU; the backends already exist.
+* **A tool the rest of the system does not have**: rejected events with their
+  reasons, and comparison across two recordings of the same patient.
+
+**Touches.** new `onset_agent/falsify.py`, new `onset_agent/benchmark.py`.
 
 ---
 
@@ -152,6 +206,13 @@ every answer's citations resolving to the window the reader can see. Reuse
 
 ## Open questions worth someone's attention
 
+* **Is the robustness rule the right rule?** `rank_channels` multiplies a
+  channel's survey rate by how well it survived a stricter threshold, capped
+  at 1. That is a design choice, not a law, and it is the mechanism by which
+  the re-planning rungs can differ from the fixed ones at all. On `sub-pt01`
+  the leading channels are so tied that a 5% penalty reshuffles them, which
+  means the rule is currently doing more than the evidence supports. Should
+  the ranking refuse to order channels whose intervals overlap?
 * **Threshold choice.** On the simulator, 3–4 robust SDs beats the published 5
   on F1. Is that a property of the simulator's SNR distribution, or a real
   improvement? Answering it needs item 5.

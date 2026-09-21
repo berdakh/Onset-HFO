@@ -8,7 +8,9 @@
    signal window behind every number.
 2. **An agent built on an open-weight language model** that can read what the
    pipeline produced, must cite it, and is refused, checked and contradicted
-   by code whenever it strays.
+   by code whenever it strays — and that can also *drive* the pipeline,
+   choosing which analyses to run and at what thresholds, then being made to
+   resolve every claim it writes back to the run that produced it.
 
 It is a **prototype**: small, readable, measured, and honest about what it
 cannot do. It is not a medical device and it makes no clinical claim. It is
@@ -54,10 +56,15 @@ ollama pull qwen2.5:7b-instruct && ollama serve &
 python -m onset_agent.cli --results artifacts/results/sub-pt01_ictal_run-01 \
        --backend ollama --chat
 
-# 5. measure the detectors against known truth
+# 5. let the model choose and parameterise the analyses, not just read them:
+#    four rungs of increasing model control over the SAME analyzers
+python -m onset_agent.orchestrate --subject sub-pt01 --task ictal --run 01 \
+       --start 50 --stop 110 --score
+
+# 6. measure the detectors against known truth
 python -m onset_hfo.cli evaluate --seeds 1 7 42
 
-pytest -q        # 58 tests, all offline, ~6 seconds
+pytest -q        # 105 tests, all offline, ~12 seconds
 ```
 
 ## What it actually does
@@ -87,6 +94,25 @@ pytest -q        # 58 tests, all offline, ~6 seconds
                                                   (store.py, onset_agent/)
 ```
 
+And, in the other direction — the agent deciding what the pipeline measures:
+
+```
+ planner ── chooses a tool and its parameters          (planner.py)
+    │       "survey every channel"  →  "now re-run the leaders at 7 SD"
+    ▼
+ tool registry ── strict JSON in, strict JSON out, one run_id per call
+    │             every call RUNS the real pipeline   (contract.py, analysis.py)
+    ▼
+ evidence store ── append-only ledger: input, output, run_id, runtime
+    │              failed calls kept too               (evidence.py)
+    ▼
+ verifier ── every number in the report must resolve to a run_id,
+    │        or the sentence is struck and recorded    (verifier.py)
+    ▼
+ ranking + report + audit trail  ──►  scored against the archive's
+                                      clinician SOZ labels (cohort.py, scoring.py)
+```
+
 ## Results you can check
 
 On **synthetic data with known truth** (three seeds, 60 s each, `python -m onset_hfo.cli evaluate`):
@@ -110,6 +136,27 @@ that its top-ranked channels do **not** overlap the contacts the clinician
 named at onset more than chance would predict —
 see [`docs/EVALUATION.md`](docs/EVALUATION.md) for why that is expected and
 what it does and does not mean.
+
+### And what the orchestration buys, honestly
+
+Four configurations over the *same* analyzers on `sub-pt01`
+(`python -m onset_agent.orchestrate ... --score`):
+
+| rung | tool calls | channels re-tested | hits @ 5 vs clinician SOZ | chance | p |
+|---|---|---|---|---|---|
+| S0 fixed pipeline | 5 | 0 | 0 | 1.03 | 1.00 |
+| S1 single-shot | 4 | 0 | 0 | 0.84 | 1.00 |
+| S2 re-planning | 7 | 2 | 0 | 0.84 | 1.00 |
+| S3 + verifier | 7 | 2 | 0 | 0.84 | 1.00 |
+
+Re-planning re-ordered the top five, and that re-ordering means nothing: the
+leading channels sit between 70 and 83 events/min with heavily overlapping
+intervals, and `PST2-PST3` *passed* its stricter-threshold check (83 → 79/min).
+On synthetic data with implanted artifacts the same mechanism does bite — a
+channel falls from 54 to 30/min and drops below one it had led — which is
+exactly the difference between a mechanism that works and a mechanism that
+helped here. Every number in the table comes from the deterministic scripted
+planner, which is the control, not the result.
 
 ## What it looks like
 
@@ -138,6 +185,7 @@ detectors plotted against each other with the disagreements highlighted:
 | [`docs/DATA.md`](docs/DATA.md) | the dataset, its licence, its annotations, and how to use your own data |
 | [`docs/METHODS.md`](docs/METHODS.md) | every algorithm, every threshold, and the paper it came from |
 | [`docs/AGENT.md`](docs/AGENT.md) | how the agent is constrained, its threat model, and how to add a tool |
+| [`docs/ORCHESTRATION.md`](docs/ORCHESTRATION.md) | the tool contract, the evidence store, the S0–S3 ladder, and what verification costs |
 | [`docs/EVALUATION.md`](docs/EVALUATION.md) | what was measured, how, and what the numbers mean |
 | [`docs/LIMITATIONS.md`](docs/LIMITATIONS.md) | what this must not be used for |
 | [`docs/GLOSSARY.md`](docs/GLOSSARY.md) | the clinical and signal-processing vocabulary, defined |
@@ -162,15 +210,25 @@ onset_hfo/            the pipeline
   viz.py              the four figures
   pipeline.py         end to end
   store.py            the read-only view the agent is given
+  cohort.py           clinician SOZ contacts, outcome and site from the archive
   cli.py              python -m onset_hfo.cli ...
 
 onset_agent/          the agent
   tools.py            eight read-only tools + strict argument validation
-  prompts.py          the system prompt and the answer contract
+  prompts.py          the system prompt, the answer contract, the planner prompt
   guard.py            scope refusals, citation checks, number verification
   backends.py         scripted · ollama · OpenAI-compatible · transformers
-  agent.py            the loop
+  agent.py            the question-answering loop
   cli.py              python -m onset_agent.cli ...
+
+  -- the model driving the analysis, not just reading it --
+  contract.py         the frozen JSON tool contract; run ids; validation
+  analysis.py         nine LIVE tools: each one re-runs the real pipeline
+  evidence.py         the append-only ledger every claim resolves against
+  planner.py          the S0-S3 ladder, three stopping rules, a scripted planner
+  verifier.py         deterministic + language-model verifiers, and their delta
+  scoring.py          ranking vs clinician SOZ labels, with a permutation null
+  orchestrate.py      python -m onset_agent.orchestrate ...
 
 notebooks/            the three Colab notebooks (built by scripts/build_notebooks.py)
 tests/                58 offline tests (synthetic data + a mock model server)
