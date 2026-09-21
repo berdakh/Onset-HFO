@@ -8,7 +8,9 @@
    signal window behind every number.
 2. **An agent built on an open-weight language model** that can read what the
    pipeline produced, must cite it, and is refused, checked and contradicted
-   by code whenever it strays.
+   by code whenever it strays — and that can also *drive* the pipeline,
+   choosing which analyses to run and at what thresholds, then being made to
+   resolve every claim it writes back to the run that produced it.
 
 It is a **prototype**: small, readable, measured, and honest about what it
 cannot do. It is not a medical device and it makes no clinical claim. It is
@@ -54,10 +56,21 @@ ollama pull qwen2.5:7b-instruct && ollama serve &
 python -m onset_agent.cli --results artifacts/results/sub-pt01_ictal_run-01 \
        --backend ollama --chat
 
-# 5. measure the detectors against known truth
+# 5. let the model choose and parameterise the analyses, not just read them:
+#    four rungs of increasing model control over the SAME analyzers
+python -m onset_agent.orchestrate --subject sub-pt01 --task ictal --run 01 \
+       --start 50 --stop 110 --score
+
+# 6. learn a per-contact model across a cohort, and find out what transfers
+python -m onset_hfo.learn cohort --dry-run   # the plan; downloads nothing
+python -m onset_hfo.learn cohort             # ~24 MB per subject, resumable
+python -m onset_hfo.learn evaluate           # within-subject vs LOPO vs cross-site
+python -m onset_hfo.learn uncertainty        # calibration, conformal coverage
+
+# 7. measure the detectors against known truth
 python -m onset_hfo.cli evaluate --seeds 1 7 42
 
-pytest -q        # 58 tests, all offline, ~6 seconds
+pytest -q        # 174 tests, all offline, ~38 seconds
 ```
 
 ## What it actually does
@@ -87,6 +100,25 @@ pytest -q        # 58 tests, all offline, ~6 seconds
                                                   (store.py, onset_agent/)
 ```
 
+And, in the other direction — the agent deciding what the pipeline measures:
+
+```
+ planner ── chooses a tool and its parameters          (planner.py)
+    │       "survey every channel"  →  "now re-run the leaders at 7 SD"
+    ▼
+ tool registry ── strict JSON in, strict JSON out, one run_id per call
+    │             every call RUNS the real pipeline   (contract.py, analysis.py)
+    ▼
+ evidence store ── append-only ledger: input, output, run_id, runtime
+    │              failed calls kept too               (evidence.py)
+    ▼
+ verifier ── every number in the report must resolve to a run_id,
+    │        or the sentence is struck and recorded    (verifier.py)
+    ▼
+ ranking + report + audit trail  ──►  scored against the archive's
+                                      clinician SOZ labels (cohort.py, scoring.py)
+```
+
 ## Results you can check
 
 On **synthetic data with known truth** (three seeds, 60 s each, `python -m onset_hfo.cli evaluate`):
@@ -110,6 +142,71 @@ that its top-ranked channels do **not** overlap the contacts the clinician
 named at onset more than chance would predict —
 see [`docs/EVALUATION.md`](docs/EVALUATION.md) for why that is expected and
 what it does and does not mean.
+
+### What a learned model buys, and what it does not
+
+22 subjects from the public archive, 1466 channels, 301 labelled SOZ
+(`python -m onset_hfo.learn evaluate`):
+
+| protocol | AUPRC | lift over prevalence | precision@5 |
+|---|---|---|---|
+| line length rate, **untrained** | 0.467 | 2.28× | 0.509 |
+| leave-one-patient-out, boosted | **0.480** | 2.34× | 0.555 |
+| leave-one-**site**-out, boosted | 0.476 | 2.32× | 0.536 |
+| **within-subject** (a ceiling, not deployable) | **0.709** | **3.45×** | 0.636 |
+
+The learned model barely beats the rate it was built from — thirteen features
+and a cross-validation harness buy about one AUPRC point. The ceiling is far
+above both: the features *are* separable inside a recording, and most of that
+does not survive the move to a new patient. **That gap is the result.** Changing
+hospital costs almost nothing on top of changing patient, which says the
+normalisation problem is at the patient level.
+
+The ceiling is not reachable on its own — it needs labels you do not have. But
+a cheaper version of it is (`python -m onset_hfo.learn personalize`): let the
+clinician label a few contacts first, then predict the rest.
+
+| contacts the clinician labels | % of the implantation | AUPRC | gap to the ceiling closed |
+|---|---|---|---|
+| 0 *(= leave-one-patient-out)* | 0% | 0.455 | 0% |
+| 2 | 3% | 0.490 | 17% |
+| **5** | **7.5%** | **0.531** | **38%** |
+| 10 | 15% | 0.555 | 50% |
+
+Five contacts — under a tenth of the electrodes — recovers well over a third
+of what is lost moving to a new patient.
+
+### Trying to break it
+
+`--falsify` attacks the system five ways, each with its expectation stated
+before it runs. On `sub-pt01`: **5/5 pass**. One of them did not, at first —
+given a simulation with no epileptic contacts at all, the pipeline ranked a
+channel at 6/min and nothing in its output said the recording was empty. There
+was no null hypothesis. The fix was not a threshold but a missing statistic:
+a leader must be distinguishable from the *median* channel's confidence
+interval, or the report says so. See
+[`docs/ORCHESTRATION.md`](docs/ORCHESTRATION.md) §6b.
+
+### And what the orchestration buys, honestly
+
+Four configurations over the *same* analyzers on `sub-pt01`
+(`python -m onset_agent.orchestrate ... --score`):
+
+| rung | tool calls | channels re-tested | hits @ 5 vs clinician SOZ | chance | p |
+|---|---|---|---|---|---|
+| S0 fixed pipeline | 5 | 0 | 0 | 1.03 | 1.00 |
+| S1 single-shot | 4 | 0 | 0 | 0.84 | 1.00 |
+| S2 re-planning | 7 | 2 | 0 | 0.84 | 1.00 |
+| S3 + verifier | 7 | 2 | 0 | 0.84 | 1.00 |
+
+Re-planning re-ordered the top five, and that re-ordering means nothing: the
+leading channels sit between 70 and 83 events/min with heavily overlapping
+intervals, and `PST2-PST3` *passed* its stricter-threshold check (83 → 79/min).
+On synthetic data with implanted artifacts the same mechanism does bite — a
+channel falls from 54 to 30/min and drops below one it had led — which is
+exactly the difference between a mechanism that works and a mechanism that
+helped here. Every number in the table comes from the deterministic scripted
+planner, which is the control, not the result.
 
 ## What it looks like
 
@@ -138,6 +235,8 @@ detectors plotted against each other with the disagreements highlighted:
 | [`docs/DATA.md`](docs/DATA.md) | the dataset, its licence, its annotations, and how to use your own data |
 | [`docs/METHODS.md`](docs/METHODS.md) | every algorithm, every threshold, and the paper it came from |
 | [`docs/AGENT.md`](docs/AGENT.md) | how the agent is constrained, its threat model, and how to add a tool |
+| [`docs/ORCHESTRATION.md`](docs/ORCHESTRATION.md) | the tool contract, the evidence store, the S0–S3 ladder, and what verification costs |
+| [`docs/LOCALIZATION.md`](docs/LOCALIZATION.md) | the cohort, the learned per-contact model, calibration and conformal sets, and how much of it transfers |
 | [`docs/EVALUATION.md`](docs/EVALUATION.md) | what was measured, how, and what the numbers mean |
 | [`docs/LIMITATIONS.md`](docs/LIMITATIONS.md) | what this must not be used for |
 | [`docs/GLOSSARY.md`](docs/GLOSSARY.md) | the clinical and signal-processing vocabulary, defined |
@@ -162,15 +261,29 @@ onset_hfo/            the pipeline
   viz.py              the four figures
   pipeline.py         end to end
   store.py            the read-only view the agent is given
+  cohort.py           clinician SOZ contacts, outcome and site from the archive
+  batch.py            the pipeline across a cohort -> one labelled feature table
+  models.py           the learned per-contact model; within-subject / LOPO / cross-site
+  uncertainty.py      calibration, split conformal sets, exchangeability stress test
+  learn.py            python -m onset_hfo.learn ...
   cli.py              python -m onset_hfo.cli ...
 
 onset_agent/          the agent
   tools.py            eight read-only tools + strict argument validation
-  prompts.py          the system prompt and the answer contract
+  prompts.py          the system prompt, the answer contract, the planner prompt
   guard.py            scope refusals, citation checks, number verification
   backends.py         scripted · ollama · OpenAI-compatible · transformers
-  agent.py            the loop
+  agent.py            the question-answering loop
   cli.py              python -m onset_agent.cli ...
+
+  -- the model driving the analysis, not just reading it --
+  contract.py         the frozen JSON tool contract; run ids; validation
+  analysis.py         nine LIVE tools: each one re-runs the real pipeline
+  evidence.py         the append-only ledger every claim resolves against
+  planner.py          the S0-S3 ladder, three stopping rules, a scripted planner
+  verifier.py         deterministic + language-model verifiers, and their delta
+  scoring.py          ranking vs clinician SOZ labels, with a permutation null
+  orchestrate.py      python -m onset_agent.orchestrate ...
 
 notebooks/            the three Colab notebooks (built by scripts/build_notebooks.py)
 tests/                58 offline tests (synthetic data + a mock model server)

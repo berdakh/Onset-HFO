@@ -1,0 +1,10 @@
+model,normalisation,protocol,n,n_patients,prevalence,auprc,auroc,auprc_lift_over_prevalence,precision_at_1,n_patients_at_1,precision_at_3,n_patients_at_3,precision_at_5,n_patients_at_5,note,auprc_per_patient_median,auprc_per_patient_iqr,n_patients_scored
+baseline:rms_rate_per_min,raw,none,1466,22,0.2053,0.4467,0.7178,2.176,0.4545,22,0.4242,22,0.4727,22,untrained: channels ranked by a single measured rate,0.4135,"[0.2684, 0.7259]",22
+baseline:ll_rate_per_min,raw,none,1466,22,0.2053,0.4674,0.7208,2.276,0.5,22,0.5303,22,0.5091,22,untrained: channels ranked by a single measured rate,0.4617,"[0.3385, 0.7186]",22
+baseline:spike_rate_per_min,raw,none,1466,22,0.2053,0.3519,0.6618,1.714,0.4545,22,0.4848,22,0.4364,22,untrained: channels ranked by a single measured rate,0.4214,"[0.1634, 0.6424]",22
+logistic,raw,within_subject,1466,22,0.2053,0.6549,0.883,3.19,0.7273,22,0.697,22,0.6909,22,"subject-specific: trained on other contacts of the SAME patient. An upper bound, not a deployable model -- using it would require already knowing some of that patient's SOZ contacts.",0.633,"[0.5357, 0.8708]",22
+gradient_boosting,raw,within_subject,1466,22,0.2053,0.7088,0.9014,3.452,0.7273,22,0.697,22,0.6364,22,"subject-specific: trained on other contacts of the SAME patient. An upper bound, not a deployable model -- using it would require already knowing some of that patient's SOZ contacts.",0.6824,"[0.4878, 0.8067]",22
+logistic,raw,lopo,1466,22,0.2053,0.4551,0.744,2.217,0.4545,22,0.5606,22,0.5727,22,left-out patient,0.5542,"[0.3554, 0.7113]",22
+gradient_boosting,raw,lopo,1466,22,0.2053,0.4802,0.7349,2.339,0.6364,22,0.6364,22,0.5545,22,left-out patient,0.5011,"[0.3957, 0.7231]",22
+logistic,raw,loso,1466,22,0.2053,0.4129,0.6892,2.011,0.4545,22,0.5455,22,0.5545,22,left-out recording centre: nothing from the test site is in training,0.4838,"[0.3144, 0.6949]",22
+gradient_boosting,raw,loso,1466,22,0.2053,0.4763,0.7047,2.32,0.6818,22,0.5758,22,0.5364,22,left-out recording centre: nothing from the test site is in training,0.4701,"[0.3852, 0.683]",22

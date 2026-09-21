@@ -1,0 +1,10 @@
+subject,reason
+sub-umf002,download/load failed: RuntimeError: HTTP 416 for https://s3.amazonaws.com/openneuro.org/ds003029/sub-umf002/ses-presurgery/ieeg/sub-umf002_ses-presurgery_task-ictal_acq-ecog_run-01_ieeg.eeg
+sub-umf003,download/load failed: RuntimeError: HTTP 416 for https://s3.amazonaws.com/openneuro.org/ds003029/sub-umf003/ses-presurgery/ieeg/sub-umf003_ses-presurgery_task-ictal_acq-ecog_run-01_ieeg.eeg
+sub-umf004,download/load failed: RuntimeError: HTTP 416 for https://s3.amazonaws.com/openneuro.org/ds003029/sub-umf004/ses-presurgery/ieeg/sub-umf004_ses-presurgery_task-ictal_acq-seeg_run-01_ieeg.eeg
+sub-umf005,download/load failed: RuntimeError: HTTP 416 for https://s3.amazonaws.com/openneuro.org/ds003029/sub-umf005/ses-presurgery/ieeg/sub-umf005_ses-presurgery_task-ictal_acq-ecog_run-01_ieeg.eeg
+sub-ummc002,sampling rate 499.75 Hz cannot support the ripple band
+sub-ummc003,sampling rate 249.875 Hz cannot support the ripple band
+sub-ummc004,sampling rate 249.875 Hz cannot support the ripple band
+sub-ummc006,sampling rate 249.875 Hz cannot support the ripple band
+sub-ummc008,sampling rate 249.875 Hz cannot support the ripple band

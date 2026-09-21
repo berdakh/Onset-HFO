@@ -30,3 +30,23 @@ def store(result, tmp_path_factory):
     from onset_hfo.store import ResultStore
 
     return ResultStore(result.save(tmp_path_factory.mktemp("results")))
+
+
+@pytest.fixture(scope="session")
+def session(recording):
+    """A live analysis session over the synthetic recording.
+
+    Session-scoped so the montage and band-pass are computed once; tests that
+    care about cost call ``reset_memo`` themselves.
+    """
+    from onset_agent.analysis import AnalysisSession
+
+    return AnalysisSession(recording, verbose=False)
+
+
+@pytest.fixture
+def registry(session):
+    from onset_agent.analysis import build_registry
+
+    session.reset_memo()
+    return build_registry(session)

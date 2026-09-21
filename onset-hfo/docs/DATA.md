@@ -67,14 +67,147 @@ expressions rather than exact strings.
 into contact names. This is a **weak textual reference**, and the distinction
 matters:
 
-* it is *not* a curated seizure-onset zone — that information lives in a
-  clinical spreadsheet in the publication, not in this archive;
+* it is *not* a curated seizure-onset zone — the curated version is a
+  separate file in the same archive, described below;
 * it is incomplete, unordered, and written for a human reader;
 * a contact may be named for reasons this pipeline does not model.
 
 `onset_hfo.evaluate.marked_contact_check` compares the top-ranked channels
 against these contacts with a permutation test. Read the result as mild
 encouragement at best, and never as accuracy. See `EVALUATION.md`.
+
+## The curated labels, which are in the archive after all
+
+An earlier version of this document said the curated seizure-onset zone
+"lives in a clinical spreadsheet in the publication, not in this archive".
+That was wrong. The archive ships
+**`ds003029/sourcedata/clinical_data_summary.xlsx`** — 30 KB, CC0 like
+everything else, one row per patient:
+
+| column | what it gives |
+|---|---|
+| `soz_contacts` | the clinician-defined seizure onset contacts, in shorthand (`"TT1-6; AST1-2, mst1-2"`) |
+| `engel_score`, `ilae_score` | surgical outcome scales |
+| `outcome` | see the warning below |
+| `surgery_type` | `resection`, `ablation`, or blank |
+| `clinical_center` | `nih`, `jhh`, `ummc`, `umf` (and `cc`, whose signals are not published) |
+
+`onset_hfo/cohort.py` reads it. Of the 35 subjects with signal files, **32
+have a row**, and on every subject spot-checked the parsed contact names
+matched `channels.tsv` exactly (10/10 on `sub-pt01`, 31/31 on `sub-umf004`,
+19/19 on `sub-jh103`).
+
+```python
+from onset_hfo.cohort import soz_labels, cohort_table
+
+labels = soz_labels("sub-pt01")
+labels.soz_contacts      # {'AD1', ..., 'ATT2', 'PD1', ...}
+labels.engel, labels.seizure_free, labels.site   # 1, True, 'NIH'
+labels.trustworthy       # True: curated label AND the surgery worked
+
+cohort_table()           # all 100 patients, decoded, ready to group by site
+```
+
+### Two traps that silently corrupt a study
+
+**`outcome` is not what it looks like.** `S` means *success* — seizure free,
+and every `S` row carries Engel 1. `F` means *failure* (Engel 2–4). `NR`
+means no resection was performed. Reading `F` as "free" inverts every label
+in the cohort. `decode_outcome` is the only place this mapping is written
+down, and a test pins it against the Engel scores.
+
+**Subject ids do not match across the two files.** The S3 tree has
+`sub-pt01`; the spreadsheet says `pt1`; there is *also* a separate, nearly
+empty `sub-pt1` directory. `normalize_subject` strips the `sub-` prefix and
+the zero padding so both sides agree.
+
+### What the labels still do not license
+
+A contact is a trustworthy positive only when the clinician named it **and**
+the patient became seizure free — resected contacts in patients who kept
+seizing are ambiguous, and treating them as positives is a common flaw in
+published work. `SozLabels.trustworthy` encodes exactly that conjunction.
+
+And these are ictal recordings. Ripple energy during a seizure spreads well
+beyond the onset region, so a ranking that scores no better than chance
+against these labels is the expected result, not a broken detector. See
+`EVALUATION.md` §6.
+
+### Working before the real labels arrive
+
+A cohort that has not been curated has no labels, and neither does the
+simulator — which would leave the scoring and ablation machinery untestable
+until a medical centre sends a spreadsheet. Two stand-ins fix that, and
+neither can be mistaken for the real thing.
+
+**Synthetic recordings** get exact labels, because the simulator knows which
+contacts it implanted ripples on:
+
+```python
+from onset_hfo.cohort import labels_from_ground_truth
+labels = labels_from_ground_truth(recording)     # source="synthetic_truth"
+```
+
+A contact is labelled when it carries at least a quarter of the busiest
+contact's events. The relative rule matters: an absolute floor alone sweeps in
+every background contact that happened to get two events, pushing label
+prevalence to a third of all channels and making any score against it
+meaningless. This is the one case where a *non-null* score is informative — it
+proves the scorer works. On the synthetic recording the fixed pipeline scores
+3 hits at k = 5 against 1.03 expected by chance, p = 0.025.
+
+**Real data awaiting curation** gets an arbitrary but reproducible stand-in:
+
+```python
+from onset_hfo.cohort import placeholder_labels
+labels = placeholder_labels("anon-01", ch_names, n_contacts=6)   # source="placeholder"
+```
+
+These contacts are chosen **independently of the signal**, on purpose. A
+stand-in that quietly correlated with what the detector finds would make every
+downstream number look encouraging for no reason, which is worse than having
+no labels at all.
+
+Both carry `is_placeholder = True`, both fail `trustworthy`, and the warning
+travels into every score's JSON — a stand-in that reaches a results table
+unmarked makes the table worthless in a way nobody can detect afterwards.
+`soz_labels` itself never invents anything: asking for a stand-in is an
+explicit call, so the decision to work against made-up labels is always
+visible at a call site.
+
+From the command line:
+
+```bash
+# run the whole scoring path on stand-ins, and emit the CSV a centre fills in
+python -m onset_agent.orchestrate --synthetic --score --labels placeholder \
+    --write-label-template labels/our-centre.csv
+
+# ... they send it back filled in; that is the entire swap
+python -m onset_agent.orchestrate --synthetic --score --labels-csv labels/our-centre.csv
+```
+
+`--labels placeholder` never overrides real labels — it is a fallback for when
+there are none, and it says so when it declines.
+
+### Using your own labels instead
+
+Everything downstream depends only on `SozLabels`, so a local cohort drops in
+without touching the pipeline or the agent. Write one CSV:
+
+```csv
+subject,soz_contacts,engel,seizure_free,site
+anon-01,"LA1-3; LH2",1,True,our-centre
+```
+
+```python
+from onset_hfo.cohort import soz_labels
+labels = soz_labels("anon-01", csv="our-centre/soz.csv")   # source="local"
+```
+
+`soz_labels` prefers, in order: your CSV, the archive spreadsheet, and
+finally the free-text markers — and records which it used in
+`labels.source`, so a number computed against weak labels can never be
+reported as if it were computed against curated ones.
 
 **`status = bad`** in `channels.tsv` marks contacts the dataset authors
 excluded: white matter, ventricle, CSF, outside the brain, or noisy. The
@@ -86,12 +219,28 @@ It publishes **ictal** snapshots — recordings around seizures. Clinical HFO
 research is usually done on **interictal** data (between seizures, often in
 slow-wave sleep), where a high ripple rate is the marker of interest.
 
+The archive does list 25 `task-interictal` files, which looks promising until
+you check what they are: all but one are metadata only (`channels.tsv`,
+`events.tsv`, `*_ieeg.json`) with **no signal file**. Exactly one interictal
+recording in the whole dataset — `sub-umf002`, run 01 — ships an `.eeg`. So
+interictal analysis is effectively unavailable here, and a second archive is
+needed for it.
+
 So what the prototype measures on this data is "where, in this seizure, the
 ripple band is loudest", not the classical interictal HFO rate. The pipeline
 partly compensates by comparing the pre-onset portion of the window with the
 seizure itself (`rate_change`), but the pre-onset stretch is minutes from a
 seizure and is not equivalent to a quiet interictal recording. This is stated
 in every report's limitations and is the first item in the roadmap.
+
+## No electrode coordinates
+
+There is no `electrodes.tsv` anywhere in `ds003029` — not for any subject.
+That rules out, on this dataset, everything that needs geometry: pairing
+bipolar channels by Euclidean distance instead of contact number, distance-to-
+neighbour features, and any source localisation. The bipolar caveat in
+`METHODS.md` §1 therefore stands unqualified here, and fixing it properly
+requires coordinates from a different archive.
 
 ## A note on amplitude units
 

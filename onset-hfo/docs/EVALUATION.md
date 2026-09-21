@@ -189,9 +189,69 @@ recordings, several patients, and resection outcome as the reference.
 
 ---
 
+## 6b. The orchestration ladder
+
+`onset_agent/orchestrate.py` runs four configurations over the *same*
+analyzers and the same recording, so any difference is attributable to who
+decided what to run. See [`ORCHESTRATION.md`](ORCHESTRATION.md) for the
+design. Reproduce with:
+
+```bash
+python -m onset_agent.orchestrate --subject sub-pt01 --task ictal --run 01 \
+    --start 50 --stop 110 --score
+```
+
+**On the real recording** (`sub-pt01`, 50–110 s, 71 bipolar channels,
+deterministic scripted planner):
+
+| rung | tool calls | wall-clock | channels re-tested | top-5 |
+|---|---|---|---|---|
+| S0 fixed pipeline | 5 | 6.2 s | 0 | PST2-PST3, ATT6-ATT7, ATT7-ATT8, AST2-AST3, ATT5-ATT6 |
+| S1 single-shot | 4 | 3.4 s | 0 | *(same)* |
+| S2 re-planning | 7 | 3.8 s | 2 | ATT6-ATT7, AST2-AST3, ATT7-ATT8, PST2-PST3, ATT5-ATT6 |
+| S3 + verifier | 7 | 3.5 s | 2 | *(same as S2)* |
+
+**Read this table carefully, because the obvious reading is wrong.** S2 did
+re-order the top five — but look at what it measured. `PST2-PST3` went from
+83.0/min at 5 robust SD to 79.0/min at 7 SD: a robustness of 0.95, which is a
+channel *passing* its robustness check, not failing it. The five leading
+channels sit between 70 and 83 events/min with heavily overlapping Poisson
+intervals; they are **tied, not ranked**, and a 5% penalty is enough to
+shuffle them. The honest statement is that on this recording re-planning found
+nothing to demote, and the re-ordering it produced carries no information.
+
+The mechanism does work when there is something to catch. On synthetic data
+with implanted artifacts, `SA2-SA3` falls from 54.0/min at 5 SD to 30.0/min at
+7 SD — robustness 0.56 — and drops below a channel it had led. S0 and S1
+cannot produce a robustness below 1.0 at all, because they never re-test.
+
+**Scored against the archive's clinician SOZ contacts** (`sub-pt01`: 10
+labelled contacts, Engel 1, seizure free, NIH — from
+`sourcedata/clinical_data_summary.xlsx`, see [`DATA.md`](DATA.md)):
+
+| rung | hits @ 5 | expected by chance | permutation p |
+|---|---|---|---|
+| S0 | 0 | 1.03 | 1.00 |
+| S1 | 0 | 0.84 | 1.00 |
+| S2 | 0 | 0.84 | 1.00 |
+| S3 | 0 | 0.84 | 1.00 |
+
+**No better than chance, for every rung.** This replaces the weaker check in
+§6 — which used the reviewer's free-text markers — with the curated label, and
+the answer does not change. The reasons given in §6 still apply and are worth
+repeating: this is one 60-second **ictal** window, ictal ripple energy spreads
+far beyond the onset region, and the classical HFO literature measures
+interictal rate. Orchestration cannot fix a measurement that is the wrong
+measurement for the question; it is not supposed to, and a ladder that
+appeared to would be measuring something else.
+
+Every number above comes from the deterministic scripted planner. It is the
+control, not the result: what a real open-weight model does to these rows is
+unmeasured, and is the first experiment to run.
+
 ## 7. Test suite
 
-`pytest -q` — 58 tests, entirely offline, about six seconds. They cover the
+`pytest -q` — 116 tests, entirely offline, about fourteen seconds. They cover the
 primitives (robust scale, sliding features, threshold segmentation, bipolar
 pairing), the detectors (hot channels found, events are oscillations, a flat
 channel yields nothing, thresholds behave monotonically, reruns are
@@ -201,6 +261,17 @@ whole agent (tool schemas, argument validation, scope refusals, citation and
 number verification, and the language-model path against a mock
 OpenAI-compatible server that replies the way Qwen and Llama servers do —
 including the two ways small models get it wrong).
+
+`tests/test_orchestration.py` adds 58 of those, covering the orchestration
+half: the label layer (including the `S`/`F` outcome inversion and the
+subject-id mismatch), the tool contract's validation and clamping, the
+evidence store's number resolution, the live tools (a stricter threshold finds
+fewer events; the same call twice gives the same numbers; an unknown channel
+is refused with a usable message), all four rungs, the three stopping rules,
+both verifiers and the delta between them, and the permutation scoring. The
+language-model paths run against small fake backends that reply the way a
+served model does, including a babbling one and a verifier that strikes a true
+sentence while missing a fabricated one.
 
 ## 8. What none of this establishes
 
