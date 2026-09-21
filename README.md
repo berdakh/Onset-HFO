@@ -1,8 +1,8 @@
 # Onset-HFO
 
-**Detecting high-frequency oscillations and interictal epileptiform discharges
-in public intracranial EEG — with an evidence-only agent on an open-weight
-model.**
+**Onset-HFO: detecting high-frequency oscillations and interictal epileptiform
+discharges in public intracranial EEG, with an evidence-only agent on an
+open-weight model. Research prototype — not a medical device.**
 
 Everything lives in [`onset-hfo/`](onset-hfo/). Start there:
 [**onset-hfo/README.md**](onset-hfo/README.md).
