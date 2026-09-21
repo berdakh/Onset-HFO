@@ -1,0 +1,8 @@
+# Minimal runtime for the pipeline and the agent (the agent's server backends
+# need nothing beyond the standard library; see pyproject.toml for the extras).
+mne>=1.6
+numpy>=1.26,<3
+scipy>=1.11
+pandas>=2.1
+matplotlib>=3.8
+requests>=2.31
