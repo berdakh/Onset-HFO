@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import json
 
+import numpy as np
+import pandas as pd
 import pytest
 
 from onset_agent.analysis import AnalysisSession, build_registry
@@ -589,3 +591,111 @@ def test_scoring_synthetic_ground_truth_beats_chance(session):
     score = score_ranking(result.top_channels, labels, ks=(5,), n_permutations=1000)
     assert score.at_k[5]["n_hits"] > score.at_k[5]["expected_by_chance"]
     assert score.at_k[5]["permutation_p"] < 0.1
+
+
+# --------------------------------------------------------------------------
+# Falsification: try to make the system confidently wrong
+# --------------------------------------------------------------------------
+
+
+def test_the_null_hypothesis_discriminates_signal_from_noise(recording):
+    """A null that always fires is worthless, so check both directions."""
+    from onset_hfo.metrics import leader_separation
+    from onset_hfo.pipeline import run_pipeline
+    from onset_hfo.synthetic import make_synthetic_recording
+
+    busy = leader_separation(run_pipeline(recording, verbose=False).rates["rms"])
+    empty_recording = make_synthetic_recording(seed=3, duration_s=30, hot_leads=0,
+                                               verbose=False)
+    empty = leader_separation(run_pipeline(empty_recording, verbose=False).rates["rms"])
+    assert busy["distinguishable"] is True, "a recording with implanted ripples has a leader"
+    assert empty["distinguishable"] is False, "a recording with nothing in it does not"
+    assert empty["n_tied_with_leader"] == empty["n_channels"]
+    assert "NO CHANNEL STANDS OUT" in empty["statement"]
+
+
+def test_leader_separation_says_so_rather_than_guessing_without_intervals():
+    from onset_hfo.metrics import leader_separation
+
+    assert leader_separation(None)["available"] is False
+    assert leader_separation(pd.DataFrame({"channel": ["A"]}))["available"] is False
+
+
+def test_the_detect_hfo_tool_carries_the_null(registry):
+    run = registry.run("detect_hfo", {"k": 3})
+    assert "leader_stands_out" in run.output
+    assert run.output["leader_separation"]["available"] is True
+    assert "leader_stands_out is false" in run.output["note"]
+
+
+def test_renaming_channels_changes_nothing_but_the_names(recording):
+    from onset_agent.falsify import anonymise_channels
+    from onset_hfo.preprocess import prepare
+
+    renamed, mapping = anonymise_channels(recording)
+    assert len(mapping) == len(recording.ch_names)
+    assert np.allclose(renamed.raw.get_data(), recording.raw.get_data())
+    # No clinical meaning survives...
+    assert not {n.upper() for n in renamed.raw.ch_names} & {n.upper()
+                                                            for n in recording.ch_names}
+    # ...but the electrode structure does, or the test compares two montages.
+    assert prepare(renamed, verbose=False).n_channels == prepare(
+        recording, verbose=False).n_channels
+
+
+def test_shuffling_permutes_names_without_touching_the_signal(recording):
+    from onset_agent.falsify import shuffle_channel_mapping
+
+    shuffled, mapping = shuffle_channel_mapping(recording, seed=1)
+    assert sorted(shuffled.raw.ch_names) == sorted(recording.ch_names)
+    assert set(mapping.values()) == set(recording.ch_names)
+    assert np.allclose(np.sort(shuffled.raw.get_data(), axis=0),
+                       np.sort(recording.raw.get_data(), axis=0))
+
+
+def test_dropping_a_channel_removes_its_contacts(recording):
+    from onset_agent.falsify import drop_channel
+
+    reduced = drop_channel(recording, recording.ch_names[0])
+    assert len(reduced.raw.ch_names) < len(recording.ch_names)
+
+
+def test_dropping_a_channel_that_is_not_there_is_an_error(recording):
+    from onset_agent.falsify import drop_channel
+
+    with pytest.raises(ValueError, match="not in this recording"):
+        drop_channel(recording, "NOSUCH1-NOSUCH2")
+
+
+def test_the_whole_suite_runs_and_every_test_states_its_expectation(recording):
+    from onset_agent.falsify import run_falsification_suite
+    from onset_hfo.cohort import soz_labels
+
+    results = run_falsification_suite(recording, soz_labels(recording.subject,
+                                                            recording=recording),
+                                      repeats=2)
+    assert len(results) == 5
+    for result in results:
+        assert result.expectation, f"{result.name} has no stated expectation"
+        assert result.verdict in ("PASS", "FAIL", "INCONCLUSIVE")
+        assert result.reading
+
+
+def test_the_system_survives_every_falsification_attempt(recording):
+    """If one of these starts failing, believe the test before the pipeline."""
+    from onset_agent.falsify import run_falsification_suite
+    from onset_hfo.cohort import soz_labels
+
+    results = run_falsification_suite(recording, soz_labels(recording.subject,
+                                                            recording=recording),
+                                      repeats=2)
+    failed = [r.name for r in results if r.passed is False]
+    assert not failed, f"falsification failures: {failed}"
+
+
+def test_a_recording_with_nothing_in_it_does_not_get_a_leader():
+    from onset_agent.falsify import falsify_no_pathology
+
+    result = falsify_no_pathology(duration_s=20)
+    assert result.passed is True
+    assert result.measure["leader_stands_out"] is False

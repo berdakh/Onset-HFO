@@ -70,7 +70,7 @@ python -m onset_hfo.learn uncertainty        # calibration, conformal coverage
 # 7. measure the detectors against known truth
 python -m onset_hfo.cli evaluate --seeds 1 7 42
 
-pytest -q        # 164 tests, all offline, ~21 seconds
+pytest -q        # 174 tests, all offline, ~38 seconds
 ```
 
 ## What it actually does
@@ -175,6 +175,17 @@ clinician label a few contacts first, then predict the rest.
 
 Five contacts — under a tenth of the electrodes — recovers well over a third
 of what is lost moving to a new patient.
+
+### Trying to break it
+
+`--falsify` attacks the system five ways, each with its expectation stated
+before it runs. On `sub-pt01`: **5/5 pass**. One of them did not, at first —
+given a simulation with no epileptic contacts at all, the pipeline ranked a
+channel at 6/min and nothing in its output said the recording was empty. There
+was no null hypothesis. The fix was not a threshold but a missing statistic:
+a leader must be distinguishable from the *median* channel's confidence
+interval, or the report says so. See
+[`docs/ORCHESTRATION.md`](docs/ORCHESTRATION.md) §6b.
 
 ### And what the orchestration buys, honestly
 

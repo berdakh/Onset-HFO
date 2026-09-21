@@ -23,6 +23,7 @@ from onset_hfo.detectors.base import Event
 
 __all__ = [
     "channel_rates",
+    "leader_separation",
     "rank_channels",
     "match_events",
     "detector_agreement",
@@ -51,6 +52,53 @@ def poisson_ci(count: int, duration_min: float, alpha: float = 0.05) -> tuple[fl
     lo = max(0.0, (root - z / 2) ** 2 - 0.25)
     hi = (root + z / 2) ** 2 - 0.25
     return (lo / duration_min, hi / duration_min)
+
+
+def leader_separation(rates, top_k: int = 5) -> dict:
+    """Does any channel actually stand out, or are they all tied?
+
+    Every ranking function will sort noise. Ask one to rank a recording with
+    nothing in it and it returns a leader, a runner-up and a confident-looking
+    order -- and nothing anywhere in the output says "there is no signal
+    here". This function is the missing null hypothesis, and it is built from
+    a quantity the pipeline already computes.
+
+    A channel is **tied with the leader** when its Poisson interval overlaps
+    the leader's. If the leader is tied with the median channel, the recording
+    has no leader: the apparent ordering is counting noise. That is a
+    statement about intervals, not a tuned threshold, so it tightens by itself
+    as the analysed window grows rather than needing a new constant.
+
+    Returns ``distinguishable=False`` when the leader cannot be told apart
+    from the middle of the pack. ``report.py`` and the ``detect_hfo`` tool
+    both surface it, so the planner and the reader see the same caveat.
+    """
+    if rates is None or not len(rates) or "rate_ci_low" not in rates.columns:
+        return {"available": False,
+                "reason": "no rate table, or no confidence intervals in it"}
+    ordered = rates.sort_values("rate_per_min", ascending=False).reset_index(drop=True)
+    leader = ordered.iloc[0]
+    leader_low = float(leader["rate_ci_low"])
+    tied = ordered[ordered["rate_ci_high"].astype(float) >= leader_low]
+    median_row = ordered.iloc[len(ordered) // 2]
+    distinguishable = float(median_row["rate_ci_high"]) < leader_low
+    return {
+        "available": True,
+        "leader": str(leader["channel"]),
+        "leader_rate_per_min": round(float(leader["rate_per_min"]), 2),
+        "leader_ci": [round(leader_low, 2), round(float(leader["rate_ci_high"]), 2)],
+        "median_rate_per_min": round(float(median_row["rate_per_min"]), 2),
+        "median_ci_high": round(float(median_row["rate_ci_high"]), 2),
+        "n_tied_with_leader": int(len(tied)),
+        "n_channels": int(len(ordered)),
+        "top_k": int(top_k),
+        "distinguishable": bool(distinguishable),
+        "statement": (f"{leader['channel']} stands out: its interval does not overlap the "
+                      f"median channel's" if distinguishable else
+                      "NO CHANNEL STANDS OUT: the leader's confidence interval overlaps "
+                      "the median channel's, so the ordering is counting noise and should "
+                      "not be read as a ranking"),
+    }
 
 
 def channel_rates(events: list[Event], duration_s: float, channels: list[str] | None = None,

@@ -268,6 +268,75 @@ allowed to make.
 
 ---
 
+## 6b. Falsification: trying to make it confidently wrong
+
+Every other number here measures how well something works. These measure
+whether it can be *broken*, and both proposals say to run them early for the
+same reason: better to find it now than at a defence.
+
+```bash
+python -m onset_agent.orchestrate --subject sub-pt01 --task ictal --run 01 \
+    --start 50 --stop 110 --falsify
+```
+
+Each test states its expectation **before** it runs. A test that can be passed
+by any outcome is not a test.
+
+| test | what it attacks | result on `sub-pt01` |
+|---|---|---|
+| **anonymised channel names** | does an LLM recite priors about electrode names instead of reading evidence? | PASS — top-5 identical (5/5) |
+| **shuffled name↔signal mapping** | is the SOZ score really measuring that correspondence? | PASS — collapsed to chance (p 1.00 → 0.42) |
+| **leading channel removed** | does removing one channel move another's rate? | PASS — 9 survivors drifted **0.00/min** |
+| **no pathology** | will it rank noise on an empty recording? | **FAILED, then fixed — see below** |
+| **run-to-run stability** | would a surgeon get the same answer twice? | PASS — identical across repeats |
+
+### The one that failed, and what it exposed
+
+Given a simulation containing *no epileptic contacts at all*, the pipeline
+ranked a channel at 6/min and reported it as the leader. Nothing anywhere in
+the output said the recording was empty. **There was no null hypothesis** —
+every ranking function sorts noise, and this one had no way to say "nothing
+here".
+
+The fix was not a threshold. `onset_hfo.metrics.leader_separation` asks
+whether the leader's Poisson interval overlaps the *median* channel's — a
+statement about intervals, built from quantities the pipeline already
+computed, which tightens by itself as the analysed window grows instead of
+needing a constant someone tuned. It is surfaced as `leader_stands_out` in
+every `detect_hfo` result, so the planner sees the caveat too.
+
+It discriminates, which is the thing to check about any null — one that always
+fires is worthless:
+
+| recording | leader | median | tied with leader | stands out? |
+|---|---|---|---|---|
+| `sub-pt01` (real seizure) | 83/min | 6/min | 16 of 71 | **yes** |
+| synthetic, hot contacts | 54/min | 4/min | 3 of 15 | **yes** |
+| synthetic, nothing implanted | 6/min | 2/min | **15 of 15** | **no** |
+
+### Two tests that were wrong before the system was
+
+Worth recording, because both failed on the real recording while passing on
+synthetic data, and both looked exactly like the system misbehaving.
+
+**Anonymisation merged the electrodes.** Renaming everything to `CH01…CH98`
+turned 14 electrodes into one, so the bipolar montage paired contacts across
+electrode boundaries and 71 analysed channels became 79. The test was
+comparing two different analyses. Anonymisation now preserves electrode
+grouping (`AD1, AD2, ATT1` → `EA1, EA2, EB1`) — and the names still have to be
+letters-then-number, because a first fix used `E01C1`, which the contact
+pattern does not match at all, so nothing paired and 71 became 85.
+
+**A bipolar channel cannot be removed in isolation.** Dropping the contacts
+behind `PST2-PST3` also destroys `PST1-PST2` and `PST3-PST4`, which share a
+contact with it. "The same recording minus one channel" does not exist, so
+"the new leading rate must be lower" was comparing two montages. The test now
+asks the diagnostic question instead: do the channels that *survive* still
+measure the same thing? They do, to 0.00/min — rates are genuinely per-channel
+and not contingent on which other channels happened to be included.
+
+---
+
 ## 7. Running it
 
 ```bash
@@ -308,11 +377,11 @@ Not yet, and each is a self-contained next piece of work:
   `ds003029` that carry both signals and SOZ labels would turn the ladder into
   a table with confidence intervals — and, grouped by the four clinical
   centres, into a leave-one-site-out generalization study.
-* **The falsification tests.** Shuffled channel labels; the leading channel
-  removed; a recording with no epileptiform activity. If the agent still
-  produces a confident ranking, that is the result a reviewer will look
-  hardest for. The plumbing is here — these are three functions over
-  `AnalysisSession`.
+* **The falsification tests under a real model.** The suite exists (§6b) and
+  passes 5/5, but every run so far is the deterministic planner. The test that
+  needs a language model is the anonymised-names one: it is specifically
+  designed to catch a model reciting priors about electrode naming, and a
+  scripted planner cannot fail it.
 * **The model and quantization ladder.** Qwen3-4B/8B/14B at FP16/8-bit/4-bit,
   scored on planning quality, tool-call validity, unsupported-claim rate and
   wall-clock. Needs a GPU; the backends already exist.

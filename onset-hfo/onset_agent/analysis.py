@@ -57,7 +57,12 @@ from onset_hfo.detectors.base import bandpass
 from onset_hfo.detectors.line_length import detect_line_length
 from onset_hfo.detectors.rms import detect_rms
 from onset_hfo.detectors.spike import detect_spikes as _detect_spikes
-from onset_hfo.metrics import channel_rates, compare_rankings, detector_agreement
+from onset_hfo.metrics import (
+    channel_rates,
+    compare_rankings,
+    detector_agreement,
+    leader_separation,
+)
 from onset_hfo.preprocess import Prepared, prepare
 from onset_hfo.validate import flag_spike_cooccurrence, validate_events
 
@@ -330,8 +335,14 @@ def _detect_hfo(s: AnalysisSession, channels: list[str] | None = None,
             "mean_prominence_db": _round_or_none(row.get("mean_prominence_db")),
         } for _, row in table.iterrows()}
     accepted = sum(e.accepted for e in events)
+    separation = leader_separation(rates, top_k=s.config.top_k)
     return {
         "detector": detector,
+        # The missing null hypothesis: every ranking function sorts noise, and
+        # without this the planner cannot tell a quiet recording from a
+        # localized one. See onset_hfo.metrics.leader_separation.
+        "leader_stands_out": separation.get("distinguishable"),
+        "leader_separation": separation,
         "threshold_sd": cfg.threshold_sd,
         "band_hz": list(cfg.band),
         "window_s": [round(window[0], 2), round(window[1], 2)],
@@ -343,7 +354,10 @@ def _detect_hfo(s: AnalysisSession, channels: list[str] | None = None,
         "showing_top_k": len(per_channel),
         "cached": cached,
         "note": ("rate_per_min counts events that survived artifact validation. "
-                 "Overlapping rate_ci intervals mean two channels are tied, not ranked."),
+                 "Overlapping rate_ci intervals mean two channels are tied, not ranked. "
+                 "If leader_stands_out is false, no channel is distinguishable from the "
+                 "middle of the pack and the ordering should not be reported as a "
+                 "ranking at all."),
     }
 
 

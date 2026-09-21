@@ -96,6 +96,10 @@ def main(argv: list[str] | None = None) -> int:
     model.add_argument("--base-url", default=None)
 
     out = p.add_argument_group("output")
+    out.add_argument("--falsify", action="store_true",
+                     help="try to break the system: anonymised names, a shuffled "
+                          "name-to-signal mapping, the leading channel removed, a "
+                          "recording with no pathology, and run-to-run stability")
     out.add_argument("--score", action="store_true",
                      help="score each ranking against the clinician SOZ labels")
     out.add_argument("--labels-csv", default=None,
@@ -235,6 +239,22 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 print("\n[orchestrate] a p-value near 1 means no better than chance. On "
                       "ictal data that is the expected result; see docs/EVALUATION.md.")
+
+    if args.falsify:
+        from onset_agent.falsify import run_falsification_suite
+
+        print("\n[orchestrate] falsification: trying to make the system confidently wrong")
+        labels = soz_labels(recording.subject, csv=args.labels_csv, recording=recording)
+        checks = run_falsification_suite(recording, labels if labels.usable else None,
+                                         rung=Rung.S2, backend=backend, repeats=3)
+        for check in checks:
+            print(f"  [{check.verdict}] {check.name}")
+            print(f"         expected: {check.expectation}")
+            print(f"         measured: {check.reading}")
+        payload["falsification"] = [c.as_dict() for c in checks]
+        failed = [c.name for c in checks if c.passed is False]
+        print(f"\n[orchestrate] {len(checks) - len(failed)}/{len(checks)} passed"
+              + (f"; FAILED: {', '.join(failed)}" if failed else ""))
 
     (out_dir / "ladder.json").write_text(json.dumps(payload, indent=2, default=str))
     print(f"\n[orchestrate] audit trail written to {out_dir}")
