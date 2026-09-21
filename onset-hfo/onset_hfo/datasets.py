@@ -52,12 +52,42 @@ __all__ = [
     "load_example",
     "list_runs",
     "parse_marked_contacts",
+    "seizure_marker_kind",
+    "list_subjects",
+    "read_tsv_text",
 ]
 
 _BYTES_PER_SAMPLE = {"IEEE_FLOAT_32": 4, "INT_16": 2, "UINT_16": 2, "IEEE_FLOAT_64": 8}
 
-_ONSET_RE = re.compile(r"\b(sz\s*)?(eeg\s+|clinical\s+|electrographic\s+)?onset\b", re.IGNORECASE)
-_OFFSET_RE = re.compile(r"\b(sz\s*)?(eeg\s+|clinical\s+|electrographic\s+)?offset\b", re.IGNORECASE)
+# Marker wording is not standardised across the four centres in this archive
+# -- the dataset README says so, and a cohort run is where it bites. Observed
+# spellings, one per centre:
+#
+#   NIH  (pt*)    "onset"                  / "offset"
+#   UMMC (ummc*)  "sz onset"               / "sz offset"
+#   UMF  (umf*)   "eeg sz start"           / "eeg sz end"
+#   JHH  (jh*)    "SZ EVENT # (EEG SZ)"    / -- no offset marker at all
+#
+# Matching only the first two silently drops half the cohort, with no error:
+# those subjects simply report "no seizure marked" and every rate-change
+# feature comes back empty.
+_ONSET_RE = re.compile(
+    r"\b(?:(?:sz|seizure)\s*)?(?:eeg\s+|clinical\s+|electrographic\s+)?"
+    r"(?:onset|(?:sz\s+|seizure\s+)?start)\b"
+    r"|\bsz\s+event\b",
+    re.IGNORECASE)
+_OFFSET_RE = re.compile(
+    r"\b(?:(?:sz|seizure)\s*)?(?:eeg\s+|clinical\s+|electrographic\s+)?"
+    r"(?:offset|(?:sz\s+|seizure\s+)?end)\b",
+    re.IGNORECASE)
+# JHH writes both electrographic and pushbutton (patient-pressed) seizure
+# events with the same "SZ EVENT #" prefix. They are different times and mean
+# different things -- a pushbutton press follows the EEG change, sometimes by
+# many seconds -- so prefer the electrographic one and record which was used.
+_ELECTROGRAPHIC_RE = re.compile(r"\b(?:eeg|electrographic)\b", re.IGNORECASE)
+_PUSHBUTTON_RE = re.compile(r"\b(?:pb|push\s*button|clinical)\b", re.IGNORECASE)
+#: Markers that look like an onset but are recording bookkeeping, not a seizure.
+_NOT_A_SEIZURE_RE = re.compile(r"\brec\s+start\b|\bsegment\b", re.IGNORECASE)
 
 
 # --------------------------------------------------------------------------
@@ -103,6 +133,11 @@ class Recording:
     events: pd.DataFrame | None = None
     channels: pd.DataFrame | None = None
     marked_contacts: list[str] = field(default_factory=list)
+    #: What kind of marker ``seizure`` came from: ``"electrographic"``,
+    #: ``"pushbutton"``, ``"unspecified"`` or ``"none"``. A pushbutton press is
+    #: when someone reacted, which can trail the EEG change by many seconds, so
+    #: a rate change measured against one means something weaker.
+    seizure_marker: str = "none"
     ground_truth: pd.DataFrame | None = None
     citation: str = ""
     notes: list[str] = field(default_factory=list)
@@ -147,6 +182,7 @@ class Recording:
             "slice_stop_s": self.t_offset + self.duration,
             "seizure_onset_s": self.seizure[0],
             "seizure_offset_s": self.seizure[1],
+            "seizure_marker": self.seizure_marker,
             "bad_channels": list(self.bads),
             "citation": self.citation,
             "notes": list(self.notes),
@@ -376,7 +412,8 @@ def _load_cached_slice(slice_dir: Path, meta: dict, verbose: bool = True) -> Rec
                 warnings.simplefilter("ignore")
                 raw.set_channel_types(types, verbose="ERROR")
 
-    seizure = _seizure_times(events)
+    seizure_onset, seizure_offset, marker_kind = _seizure_times(events, with_kind=True)
+    seizure = (seizure_onset, seizure_offset)
     marked = parse_marked_contacts(events, raw.ch_names, seizure)
     _attach_annotations(raw, events, t_start)
 
@@ -401,6 +438,7 @@ def _load_cached_slice(slice_dir: Path, meta: dict, verbose: bool = True) -> Rec
         events=events,
         channels=channels,
         marked_contacts=marked,
+        seizure_marker=marker_kind,
         citation=DATASET.citation,
         notes=notes,
     )
@@ -422,6 +460,46 @@ def load_example(**kwargs) -> Recording:
 # --------------------------------------------------------------------------
 
 
+def list_subjects() -> list[str]:
+    """Every ``sub-*`` directory in the archive that contains a signal file.
+
+    One S3 listing, no signal downloaded. Used to plan a cohort run before
+    committing to the bandwidth.
+    """
+    subjects: set[str] = set()
+    token = ""
+    for _page in range(20):
+        url = (f"{DATASET.base_url}/?list-type=2&prefix={DATASET.dataset_id}/"
+               f"&max-keys=1000")
+        if token:
+            from urllib.parse import quote
+            url += f"&continuation-token={quote(token, safe='')}"
+        xml = _http_get(url).decode("utf-8", "replace")
+        for key in re.findall(r"<Key>([^<]+)</Key>", xml):
+            if key.endswith("_ieeg.eeg"):
+                match = re.search(r"/(sub-[A-Za-z0-9]+)/", key)
+                if match:
+                    subjects.add(match.group(1))
+        if "<IsTruncated>true</IsTruncated>" not in xml:
+            break
+        found = re.search(r"<NextContinuationToken>([^<]+)</NextContinuationToken>", xml)
+        if not found:
+            break
+        token = found.group(1)
+    return sorted(subjects)
+
+
+def read_tsv_text(text: str) -> pd.DataFrame | None:
+    """Parse a TSV already in memory (a sidecar fetched without caching it)."""
+    import io
+
+    try:
+        frame = pd.read_csv(io.StringIO(text), sep="\t")
+    except Exception:
+        return None
+    return frame if len(frame.columns) else None
+
+
 def _read_tsv(path: Path) -> pd.DataFrame | None:
     if not path.exists():
         return None
@@ -437,28 +515,59 @@ def _mne_type(bids_type: str) -> str:
         str(bids_type).upper(), "misc")
 
 
-def _seizure_times(events: pd.DataFrame | None) -> tuple[float | None, float | None]:
-    """Find electrographic seizure onset/offset in the BIDS events table.
+def seizure_marker_kind(label: str) -> str:
+    """``"electrographic"``, ``"pushbutton"`` or ``"unspecified"`` for one marker.
+
+    Kept public because the distinction changes what a rate-change number
+    means: a pushbutton press is when the patient or nurse reacted, which can
+    trail the EEG change by many seconds.
+    """
+    if _ELECTROGRAPHIC_RE.search(label):
+        return "electrographic"
+    if _PUSHBUTTON_RE.search(label):
+        return "pushbutton"
+    return "unspecified"
+
+
+def _seizure_times(events: pd.DataFrame | None,
+                   with_kind: bool = False):
+    """Find seizure onset/offset in the BIDS events table.
 
     Marker wording is not standardised across centres (the dataset README says
-    so explicitly), hence the regular expressions rather than an exact match.
+    so explicitly), hence the regular expressions rather than an exact match --
+    see the patterns above for the four spellings this archive actually uses.
+
+    When a run carries several onset markers, the **electrographic** one wins
+    over a pushbutton one regardless of which came first in the file. With
+    ``with_kind=True`` the marker kind is returned alongside the times, so a
+    caller can record in its provenance that a given rate change was measured
+    against a patient-pressed button rather than an EEG change.
     """
+    empty = (None, None, "none") if with_kind else (None, None)
     if events is None or "trial_type" not in events.columns:
-        return (None, None)
-    onset = offset = None
+        return empty
+    candidates: list[tuple[float, str]] = []
+    offset = None
     for _, row in events.iterrows():
         try:
             t = float(row["onset"])
         except (TypeError, ValueError):
             continue
         label = str(row["trial_type"])
-        if onset is None and _ONSET_RE.search(label):
-            onset = t
+        if _NOT_A_SEIZURE_RE.search(label):
+            continue
+        if _ONSET_RE.search(label):
+            candidates.append((t, seizure_marker_kind(label)))
         elif _OFFSET_RE.search(label):
             offset = t
-    if onset is not None and offset is not None and offset <= onset:
+    if not candidates:
+        return empty
+    # Electrographic first, then the earliest of whatever is left.
+    electrographic = [c for c in candidates if c[1] == "electrographic"]
+    onset, kind = min(electrographic or candidates, key=lambda c: c[0])
+    if offset is not None and offset <= onset:
         offset = None
-    return (onset, offset)
+    return (onset, offset, kind) if with_kind else (onset, offset)
 
 
 def parse_marked_contacts(

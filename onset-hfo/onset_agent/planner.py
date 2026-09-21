@@ -53,7 +53,8 @@ from onset_agent.evidence import EvidenceStore
 from onset_agent.prompts import planner_prompt, report_prompt
 
 __all__ = ["Rung", "PlannerResult", "StopRule", "FixedBudget", "ModelJudged",
-           "TiedSetWidth", "rank_channels", "run_rung", "ScriptedPlanner", "FIXED_PLAN"]
+           "TiedSetWidth", "ConformalWidth", "rank_channels", "run_rung",
+           "ScriptedPlanner", "FIXED_PLAN"]
 
 
 class Rung(str, Enum):
@@ -142,6 +143,54 @@ class ModelJudged(StopRule):
             return True, "the model judged the evidence sufficient"
         if len(store) >= self.max_calls:
             return True, f"hard ceiling of {self.max_calls} tool calls reached"
+        return False, ""
+
+
+@dataclass
+class ConformalWidth(StopRule):
+    """Stop when the learned model's candidate set is narrow enough to act on.
+
+    This is the uncertainty-driven stopping rule, and the one place the two
+    halves of the system actually meet. The planner keeps gathering evidence
+    while the set of channels that cannot be ruled out at ``1 - alpha`` is
+    wider than ``max_width``, and stops when it is not.
+
+    Unlike :class:`TiedSetWidth`, this one rests on a real split-conformal
+    threshold, so ``guarantees_coverage`` is True *in the sense the theorem
+    means it*: coverage holds when calibration and test data are
+    exchangeable. On a new patient from a new centre they are not, and the
+    measured degradation is reported by
+    :func:`onset_hfo.uncertainty.exchangeability_stress_test` rather than
+    assumed away. A rule that stops early because a broken guarantee said the
+    set was narrow is the failure mode to watch for, and it is why the
+    stopping rules are compared rather than one of them chosen.
+
+    Requires a model on the session; without one the width is unavailable and
+    the rule falls back to its call ceiling, so a missing model degrades the
+    planner rather than crashing it.
+    """
+
+    max_width: int = 5
+    max_calls: int = 12
+    name: str = "conformal_width"
+    guarantees_coverage: bool = True
+
+    @staticmethod
+    def width(store: EvidenceStore) -> int | None:
+        runs = store.runs("estimate_soz_probability", ok_only=True)
+        if not runs:
+            return None
+        return (runs[-1].output or {}).get("candidate_set_size")
+
+    def should_stop(self, store: EvidenceStore, model_said_done: bool) -> tuple[bool, str]:
+        if len(store) >= self.max_calls:
+            return True, f"hard ceiling of {self.max_calls} tool calls reached"
+        current = self.width(store)
+        if current is None:
+            return False, ""
+        if current <= self.max_width:
+            return True, (f"the conformal candidate set is down to {current} channel(s), "
+                          f"at or below the {self.max_width} needed to act on")
         return False, ""
 
 
@@ -584,6 +633,9 @@ class ScriptedPlanner(Backend):
         if "compare_001" not in transcript:
             return {"thought": "check whether the two detectors agree about the leaders",
                     "tool": "compare_detectors", "arguments": {}}
+        if "soz_001" not in transcript and "no learned SOZ model" not in transcript:
+            return {"thought": "ask the learned model how far the candidate set has narrowed",
+                    "tool": "estimate_soz_probability", "arguments": {"k": 10}}
         if "evidence_001" not in transcript and leaders:
             return {"thought": "retrieve citable events for the leading channel",
                     "tool": "get_event_evidence",

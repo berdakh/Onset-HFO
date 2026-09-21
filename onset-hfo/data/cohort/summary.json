@@ -1,0 +1,14 @@
+{
+  "n_subjects_planned": 31,
+  "n_subjects_analysed": 22,
+  "n_subjects_failed": 9,
+  "n_channels": 1466,
+  "n_soz_channels": 301,
+  "sites": {
+    "JHH": 6,
+    "NIH": 13,
+    "UMF": 1,
+    "UMMC": 2
+  },
+  "cache_dir": "/home/user/onset-hfo/onset-hfo/artifacts/data"
+}

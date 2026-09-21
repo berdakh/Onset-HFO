@@ -48,6 +48,7 @@ from dataclasses import replace
 from typing import Any
 
 import numpy as np
+import pandas as pd
 
 from onset_agent.contract import ContractError, ToolRegistry, ToolSpec
 from onset_hfo.config import BANDS, PipelineConfig
@@ -83,10 +84,15 @@ class AnalysisSession:
     """
 
     def __init__(self, recording: Recording, config: PipelineConfig | None = None,
-                 verbose: bool = False):
+                 verbose: bool = False, soz_model=None):
         self.recording = recording
         self.config = config or PipelineConfig()
         self.verbose = verbose
+        #: An optional :class:`~onset_hfo.models.SozModel`. When present, the
+        #: ``estimate_soz_probability`` tool works and the planner can stop on
+        #: the width of its candidate set. Everything else runs without it.
+        self.soz_model = soz_model
+        self._model_features: pd.DataFrame | None = None
         self._prepared: Prepared | None = None
         self._filtered: dict[tuple[float, float], np.ndarray] = {}
         self._memo: dict[tuple, Any] = {}
@@ -106,6 +112,30 @@ class AnalysisSession:
         if key not in self._filtered:
             self._filtered[key] = bandpass(self.prepared.data, self.prepared.sfreq, key)
         return self._filtered[key]
+
+    def model_features(self):
+        """The per-channel feature table the learned model expects.
+
+        Built with the *same* code the cohort was built with
+        (:mod:`onset_hfo.batch`), so a feature means the same thing at
+        training time and at prediction time. Reimplementing it here to save
+        a pipeline run is how a model silently starts reading a different
+        quantity from the one it was fitted on.
+
+        Cached for the session: it is one full pipeline run.
+        """
+        if self._model_features is None:
+            from onset_hfo.batch import (
+                _features_from_result,
+                add_within_subject_normalisation,
+            )
+            from onset_hfo.pipeline import run_pipeline
+
+            result = run_pipeline(self.recording, self.config, verbose=self.verbose)
+            frame = _features_from_result(result, self.recording)
+            frame.insert(0, "subject", self.recording.subject)
+            self._model_features = add_within_subject_normalisation(frame)
+        return self._model_features
 
     def reset_memo(self) -> None:
         """Forget cached detections, keeping the montage and the band-pass.
@@ -517,6 +547,61 @@ def _event_evidence(s: AnalysisSession, channel: str, detector: str = "rms",
             "note": "start_s and stop_s are seconds in the original recording"}
 
 
+def _estimate_soz_probability(s: AnalysisSession, alpha: float | None = None,
+                              k: int = 15) -> dict:
+    """Score every channel with the learned model, and return the candidate set.
+
+    This is where the two halves of the system meet. The planner does not know
+    how the model works and does not need to: it is a tool with a JSON
+    contract like any other. What comes back is a calibrated probability per
+    channel and, at the stated ``alpha``, the **candidate set** -- the
+    channels that cannot be ruled out.
+
+    The width of that set is the point. A patient whose candidate set is four
+    channels has an actionable result; one whose set is forty has not been
+    localized, however confident any individual number looks. That width is
+    what :class:`onset_agent.planner.ConformalWidth` stops on.
+
+    Requires a model, attached to the session as ``session.soz_model``. Without
+    one the tool says so rather than guessing, and the planner can act on the
+    refusal like any other tool error.
+    """
+    model = getattr(s, "soz_model", None)
+    if model is None:
+        raise ContractError(
+            "no learned SOZ model is attached to this session. Fit one with "
+            "onset_hfo.models.fit_soz_model on a cohort, then pass it to "
+            "AnalysisSession(..., soz_model=model). The other tools work without it.")
+
+    frame = s.model_features()
+    probabilities = model.predict(frame)
+    sets = model.conformal_sets(probabilities)
+    in_set = [1 in candidate for candidate in sets]
+
+    order = np.argsort(-probabilities)
+    rows = []
+    for i in order[:max(1, int(k))]:
+        rows.append({"channel": str(frame["channel"].iloc[i]),
+                     "probability": round(float(probabilities[i]), 4),
+                     "in_candidate_set": bool(in_set[i])})
+    width = int(sum(in_set))
+    return {
+        "alpha": model.alpha if alpha is None else float(alpha),
+        "nominal_coverage": round(1.0 - model.alpha, 3),
+        "n_channels": int(len(frame)),
+        "candidate_set_size": width,
+        "candidate_fraction": round(width / max(1, len(frame)), 4),
+        "candidate_channels": [str(frame["channel"].iloc[i]) for i in order
+                               if in_set[i]][:max(1, int(k))],
+        "channels": rows,
+        "model": model.describe(),
+        "note": ("candidate_set_size is how many channels cannot be ruled out at this "
+                 "coverage level. A wide set means the recording has not been localized, "
+                 "not that every channel is involved. This is a measurement of ripple-band "
+                 "and discharge features, not a seizure onset zone."),
+    }
+
+
 def _round_or_none(value) -> float | None:
     try:
         number = float(value)
@@ -599,6 +684,14 @@ ANALYSIS_TOOLS: list[ToolSpec] = [
              _obj({"channels": _CHANNELS, "detector": _DETECTOR, "threshold_sd": _THRESHOLD,
                    "k": _K}),
              _propagation_lead, "lead", recomputes=True),
+    ToolSpec("estimate_soz_probability",
+             "Score every channel with the learned model and return the candidate set: "
+             "the channels that cannot be ruled out at the stated coverage level. Call it "
+             "to find out whether the evidence so far has narrowed the answer. Only "
+             "available when a model is attached to the session.",
+             _obj({"alpha": {"type": "number", "minimum": 0.01, "maximum": 0.5},
+                   "k": {"type": "integer", "minimum": 1, "maximum": 50}}),
+             _estimate_soz_probability, "soz", recomputes=True),
     ToolSpec("get_event_evidence",
              "The strongest detected events on one channel, each with an evidence_id, time "
              "window, peak frequency and spectral prominence. Every factual claim must cite "

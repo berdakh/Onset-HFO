@@ -61,10 +61,16 @@ python -m onset_agent.cli --results artifacts/results/sub-pt01_ictal_run-01 \
 python -m onset_agent.orchestrate --subject sub-pt01 --task ictal --run 01 \
        --start 50 --stop 110 --score
 
-# 6. measure the detectors against known truth
+# 6. learn a per-contact model across a cohort, and find out what transfers
+python -m onset_hfo.learn cohort --dry-run   # the plan; downloads nothing
+python -m onset_hfo.learn cohort             # ~24 MB per subject, resumable
+python -m onset_hfo.learn evaluate           # within-subject vs LOPO vs cross-site
+python -m onset_hfo.learn uncertainty        # calibration, conformal coverage
+
+# 7. measure the detectors against known truth
 python -m onset_hfo.cli evaluate --seeds 1 7 42
 
-pytest -q        # 116 tests, all offline, ~14 seconds
+pytest -q        # 156 tests, all offline, ~19 seconds
 ```
 
 ## What it actually does
@@ -137,6 +143,25 @@ named at onset more than chance would predict —
 see [`docs/EVALUATION.md`](docs/EVALUATION.md) for why that is expected and
 what it does and does not mean.
 
+### What a learned model buys, and what it does not
+
+22 subjects from the public archive, 1466 channels, 301 labelled SOZ
+(`python -m onset_hfo.learn evaluate`):
+
+| protocol | AUPRC | lift over prevalence | precision@5 |
+|---|---|---|---|
+| line length rate, **untrained** | 0.467 | 2.28× | 0.509 |
+| leave-one-patient-out, boosted | **0.480** | 2.34× | 0.555 |
+| leave-one-**site**-out, boosted | 0.476 | 2.32× | 0.536 |
+| **within-subject** (a ceiling, not deployable) | **0.709** | **3.45×** | 0.636 |
+
+The learned model barely beats the rate it was built from — thirteen features
+and a cross-validation harness buy about one AUPRC point. The ceiling is far
+above both: the features *are* separable inside a recording, and most of that
+does not survive the move to a new patient. **That gap is the result.** Changing
+hospital costs almost nothing on top of changing patient, which says the
+normalisation problem is at the patient level.
+
 ### And what the orchestration buys, honestly
 
 Four configurations over the *same* analyzers on `sub-pt01`
@@ -186,6 +211,7 @@ detectors plotted against each other with the disagreements highlighted:
 | [`docs/METHODS.md`](docs/METHODS.md) | every algorithm, every threshold, and the paper it came from |
 | [`docs/AGENT.md`](docs/AGENT.md) | how the agent is constrained, its threat model, and how to add a tool |
 | [`docs/ORCHESTRATION.md`](docs/ORCHESTRATION.md) | the tool contract, the evidence store, the S0–S3 ladder, and what verification costs |
+| [`docs/LOCALIZATION.md`](docs/LOCALIZATION.md) | the cohort, the learned per-contact model, calibration and conformal sets, and how much of it transfers |
 | [`docs/EVALUATION.md`](docs/EVALUATION.md) | what was measured, how, and what the numbers mean |
 | [`docs/LIMITATIONS.md`](docs/LIMITATIONS.md) | what this must not be used for |
 | [`docs/GLOSSARY.md`](docs/GLOSSARY.md) | the clinical and signal-processing vocabulary, defined |
@@ -211,6 +237,10 @@ onset_hfo/            the pipeline
   pipeline.py         end to end
   store.py            the read-only view the agent is given
   cohort.py           clinician SOZ contacts, outcome and site from the archive
+  batch.py            the pipeline across a cohort -> one labelled feature table
+  models.py           the learned per-contact model; within-subject / LOPO / cross-site
+  uncertainty.py      calibration, split conformal sets, exchangeability stress test
+  learn.py            python -m onset_hfo.learn ...
   cli.py              python -m onset_hfo.cli ...
 
 onset_agent/          the agent
