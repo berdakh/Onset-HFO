@@ -11,6 +11,13 @@ attributable to orchestration rather than to signal processing.
     python -m onset_agent.orchestrate --subject sub-pt01 --task ictal --run 01 \
         --start 50 --stop 110 --score
 
+    # no labels yet? run the scoring path anyway on stand-ins, and emit the CSV
+    # a clinical centre fills in to replace them
+    python -m onset_agent.orchestrate --synthetic --score --labels placeholder \
+        --write-label-template labels/our-centre.csv
+    python -m onset_agent.orchestrate --synthetic --score \
+        --labels-csv labels/our-centre.csv
+
     # with a real open-weight model driving the planner
     ollama pull qwen2.5:7b-instruct && ollama serve &
     python -m onset_agent.orchestrate --synthetic --backend ollama
@@ -34,7 +41,12 @@ from onset_agent.analysis import AnalysisSession
 from onset_agent.backends import make_backend
 from onset_agent.planner import FixedBudget, ModelJudged, Rung, TiedSetWidth, run_rung
 from onset_agent.scoring import compare_rungs, score_result
-from onset_hfo.cohort import soz_labels
+from onset_hfo.cohort import (
+    SozLabels,
+    placeholder_labels,
+    soz_labels,
+    write_label_template,
+)
 from onset_hfo.config import RESULTS_DIR
 
 STOP_RULES = {"budget": FixedBudget, "model": ModelJudged, "tied": TiedSetWidth}
@@ -85,9 +97,20 @@ def main(argv: list[str] | None = None) -> int:
 
     out = p.add_argument_group("output")
     out.add_argument("--score", action="store_true",
-                     help="score each ranking against the archive's clinician SOZ labels")
+                     help="score each ranking against the clinician SOZ labels")
     out.add_argument("--labels-csv", default=None,
                      help="your own label file, instead of the archive's (see cohort.py)")
+    out.add_argument("--labels", default="auto", choices=["auto", "placeholder", "none"],
+                     help="'auto' uses the best real labels available and scores nothing "
+                          "if there are none; 'placeholder' falls back to generated "
+                          "stand-in labels when there are none, so the scoring path runs "
+                          "on un-curated data (it never overrides real labels); 'none' "
+                          "ignores whatever labels exist")
+    out.add_argument("--placeholder-contacts", type=int, default=6,
+                     help="how many contacts a placeholder label set names")
+    out.add_argument("--write-label-template", default=None, metavar="PATH",
+                     help="write the CSV a clinical centre fills in, prefilled with what "
+                          "is known, then continue")
     out.add_argument("--out", default=None, help="directory for the audit trail")
     out.add_argument("--verbose", "-v", action="store_true")
     args = p.parse_args(argv)
@@ -158,13 +181,36 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  {label:12s} identical={info['identical']} "
                   f"overlap={info['top5_overlap_with_first']}")
 
-    if args.score:
+    if args.score or args.write_label_template:
         labels = soz_labels(recording.subject, csv=args.labels_csv, recording=recording)
+        if args.labels == "placeholder" and not labels.usable:
+            labels = placeholder_labels(recording.subject, session.prepared.ch_names,
+                                        n_contacts=args.placeholder_contacts)
+        elif args.labels == "placeholder":
+            print(f"\n[orchestrate] --labels placeholder ignored: real labels exist for "
+                  f"{recording.subject} (source={labels.source}). A stand-in never "
+                  "overrides a real label.")
+        elif args.labels == "none":
+            labels = SozLabels(subject=recording.subject, source="none")
+
+        if args.write_label_template:
+            path = write_label_template(recording.subject, session.prepared.ch_names,
+                                        args.write_label_template, labels=labels)
+            print(f"\n[orchestrate] label template written to {path}")
+            print("[orchestrate] fill in soz_contacts and pass it back with --labels-csv; "
+                  "nothing else changes.")
+
+    if args.score:
         print(f"\n[orchestrate] labels: {len(labels.soz_contacts)} SOZ contact(s), "
               f"source={labels.source}, engel={labels.engel}, "
               f"seizure_free={labels.seizure_free}, site={labels.site or 'n/a'}")
+        if labels.warning:
+            print(f"[orchestrate] !! {labels.warning}")
         if not labels.usable:
             print("[orchestrate] no labelled contacts for this subject; nothing to score.")
+            print("[orchestrate] re-run with --labels placeholder to exercise the scoring "
+                  "path anyway, or --write-label-template PATH to produce the CSV a centre "
+                  "fills in.")
         else:
             rows = compare_rungs(results, labels, k=5)
             payload["labels"] = labels.as_dict()
@@ -179,8 +225,16 @@ def main(argv: list[str] | None = None) -> int:
                       f"{str(row['n_hits_at_5']):>6s} "
                       f"{str(row['expected_by_chance_at_5']):>7s} "
                       f"{str(row['permutation_p_at_5']):>7s}")
-            print("\n[orchestrate] a p-value near 1 means no better than chance. On ictal "
-                  "data that is the expected result; see docs/EVALUATION.md.")
+            if labels.source == "placeholder":
+                print("\n[orchestrate] !! the table above was scored against generated "
+                      "labels and means nothing. It shows the scoring path runs.")
+            elif labels.source == "synthetic_truth":
+                print("\n[orchestrate] the table above was scored against the contacts the "
+                      "simulator implanted events on. Those labels are exactly right, so a "
+                      "result here says the scorer works -- it says nothing about a brain.")
+            else:
+                print("\n[orchestrate] a p-value near 1 means no better than chance. On "
+                      "ictal data that is the expected result; see docs/EVALUATION.md.")
 
     (out_dir / "ladder.json").write_text(json.dumps(payload, indent=2, default=str))
     print(f"\n[orchestrate] audit trail written to {out_dir}")

@@ -64,7 +64,7 @@ python -m onset_agent.orchestrate --subject sub-pt01 --task ictal --run 01 \
 # 6. measure the detectors against known truth
 python -m onset_hfo.cli evaluate --seeds 1 7 42
 
-pytest -q        # 105 tests, all offline, ~12 seconds
+pytest -q        # 116 tests, all offline, ~14 seconds
 ```
 
 ## What it actually does

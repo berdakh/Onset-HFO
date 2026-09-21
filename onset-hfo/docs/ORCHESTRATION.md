@@ -249,9 +249,16 @@ contacts are a large and uneven fraction of the implanted contacts — on some
 subjects here a third of all channels touch a named one, and "3 of the top 5"
 would then be unremarkable.
 
-Every score carries `label_source` and `trustworthy`, so a number computed
-against weak free-text markers can never be mistaken for one computed against
-a curated label.
+Every score carries `label_source`, `trustworthy` and `is_placeholder`, so a
+number computed against weak free-text markers — or against generated stand-in
+labels — can never be mistaken for one computed against a curated label.
+
+**Before the real labels exist**, two stand-ins keep this machinery runnable
+(see [`DATA.md`](DATA.md)): exact labels derived from a synthetic recording's
+implanted events, and arbitrary seeded placeholders for un-curated real data.
+Both fail `trustworthy`, and their warning travels into every score's JSON.
+`--write-label-template` emits the one CSV a clinical centre fills in;
+passing it back with `--labels-csv` replaces the stand-in everywhere at once.
 
 **Nothing in this module identifies a seizure onset zone for a patient.** It
 scores a ranking against a record, retrospectively, on data whose outcome is

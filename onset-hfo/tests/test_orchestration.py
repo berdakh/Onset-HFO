@@ -38,8 +38,12 @@ from onset_hfo.cohort import (
     decode_outcome,
     expand_contacts,
     label_channels,
+    labels_from_ground_truth,
     load_labels_csv,
     normalize_subject,
+    placeholder_labels,
+    soz_labels,
+    write_label_template,
 )
 
 # --------------------------------------------------------------------------
@@ -482,3 +486,106 @@ def test_the_label_source_is_carried_into_every_score():
     weak = SozLabels("x", {"A1"}, source="events_markers")
     score = score_ranking(["A1-A2", "B1-B2"], weak, ks=(1,), n_permutations=200)
     assert score.label_source == "events_markers" and score.trustworthy is False
+
+
+# --------------------------------------------------------------------------
+# Stand-in labels, for before the real ones exist
+# --------------------------------------------------------------------------
+
+
+def test_synthetic_labels_recover_the_contacts_events_were_implanted_on(recording):
+    """Not an estimate: the simulator knows exactly where it put the ripples."""
+    labels = labels_from_ground_truth(recording)
+    assert labels.soz_contacts == {c.upper() for c in recording.marked_contacts}
+    assert labels.source == "synthetic_truth"
+
+
+def test_the_ground_truth_rule_is_scale_free_not_an_absolute_floor():
+    """An absolute floor sweeps in every background contact that got two events,
+    pushing label prevalence to a third of all channels."""
+    import pandas as pd
+
+    class _Rec:
+        subject = "sim"
+        ground_truth = pd.DataFrame({
+            "kind": ["ripple"] * 6,
+            "contact": ["HOT1"] * 3 + ["HOT2"] * 2 + ["COLD1"]})
+
+    labels = labels_from_ground_truth(_Rec(), min_events=1, min_fraction=0.5)
+    assert labels.soz_contacts == {"HOT1", "HOT2"}
+
+
+def test_artifacts_are_never_a_label(recording):
+    """The simulator implants them so the detector can be caught reporting them."""
+    ripples = labels_from_ground_truth(recording, kind="ripple").soz_contacts
+    artifacts = labels_from_ground_truth(recording, kind="artifact").soz_contacts
+    assert ripples and ripples != artifacts
+
+
+def test_a_real_recording_gets_no_invented_labels():
+    """soz_labels never makes anything up; asking for a stand-in is explicit."""
+    class _Rec:
+        subject = "sub-nobody-999"
+        marked_contacts: list = []
+        ground_truth = None
+
+    labels = soz_labels("sub-nobody-999", recording=_Rec())
+    assert not labels.usable and labels.source == "none"
+
+
+def test_placeholder_labels_are_reproducible_and_drawn_from_real_channels():
+    channels = ["AD1-AD2", "AD2-AD3", "ATT1-ATT2", "G16-G17"]
+    first = placeholder_labels("anon-01", channels, n_contacts=3, seed=0)
+    again = placeholder_labels("anon-01", channels, n_contacts=3, seed=0)
+    assert first.soz_contacts == again.soz_contacts and len(first.soz_contacts) == 3
+    assert first.soz_contacts <= {"AD1", "AD2", "AD3", "ATT1", "ATT2", "G16", "G17"}
+
+
+def test_placeholder_labels_ask_for_more_contacts_than_exist():
+    labels = placeholder_labels("anon-01", ["A1-A2"], n_contacts=50)
+    assert labels.soz_contacts == {"A1", "A2"}
+
+
+@pytest.mark.parametrize("source", ["placeholder", "synthetic_truth"])
+def test_stand_ins_are_never_trustworthy_and_always_carry_a_warning(source):
+    labels = SozLabels("x", {"A1"}, source=source, seizure_free=True)
+    assert labels.is_placeholder and not labels.trustworthy and labels.warning
+
+
+def test_the_warning_travels_into_the_serialised_score():
+    """A stand-in reaching a results table unmarked is undetectable later."""
+    labels = placeholder_labels("anon-01", ["A1-A2", "B1-B2", "C1-C2"], n_contacts=1)
+    payload = score_ranking(["A1-A2", "B1-B2"], labels, ks=(1,),
+                            n_permutations=200).as_dict()
+    assert payload["is_placeholder"] is True
+    assert "PLACEHOLDER" in payload["warning"]
+    assert json.dumps(payload)      # survives being written to a results file
+
+
+def test_the_label_template_round_trips_into_real_labels(tmp_path):
+    """Filling the template in and passing it back is the whole swap."""
+    channels = ["AD1-AD2", "ATT1-ATT2"]
+    stand_in = placeholder_labels("anon-01", channels, n_contacts=2, seed=0)
+    path = write_label_template("anon-01", channels, tmp_path / "soz.csv", labels=stand_in)
+
+    text = path.read_text()
+    assert "AD1, AD2, ATT1, ATT2" in text      # the exact spelling to use
+    assert "PLACEHOLDER" in text               # and that these are not real
+
+    # A centre overwrites soz_contacts and sends it back; the comments stay.
+    path.write_text(text.replace(
+        f"anon-01,{'; '.join(sorted(stand_in.soz_contacts))}",
+        'anon-01,"AD1-2; ATT1"'))
+    real = load_labels_csv(path)["anon-01"]
+    assert real.soz_contacts == {"AD1", "AD2", "ATT1"}
+    assert real.source == "local" and not real.is_placeholder
+
+
+def test_scoring_synthetic_ground_truth_beats_chance(session):
+    """The one case where a non-null score proves the scorer, not the brain."""
+    session.reset_memo()
+    result = run_rung(session, Rung.S0)
+    labels = labels_from_ground_truth(session.recording)
+    score = score_ranking(result.top_channels, labels, ks=(5,), n_permutations=1000)
+    assert score.at_k[5]["n_hits"] > score.at_k[5]["expected_by_chance"]
+    assert score.at_k[5]["permutation_p"] < 0.1

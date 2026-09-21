@@ -133,6 +133,62 @@ beyond the onset region, so a ranking that scores no better than chance
 against these labels is the expected result, not a broken detector. See
 `EVALUATION.md` §6.
 
+### Working before the real labels arrive
+
+A cohort that has not been curated has no labels, and neither does the
+simulator — which would leave the scoring and ablation machinery untestable
+until a medical centre sends a spreadsheet. Two stand-ins fix that, and
+neither can be mistaken for the real thing.
+
+**Synthetic recordings** get exact labels, because the simulator knows which
+contacts it implanted ripples on:
+
+```python
+from onset_hfo.cohort import labels_from_ground_truth
+labels = labels_from_ground_truth(recording)     # source="synthetic_truth"
+```
+
+A contact is labelled when it carries at least a quarter of the busiest
+contact's events. The relative rule matters: an absolute floor alone sweeps in
+every background contact that happened to get two events, pushing label
+prevalence to a third of all channels and making any score against it
+meaningless. This is the one case where a *non-null* score is informative — it
+proves the scorer works. On the synthetic recording the fixed pipeline scores
+3 hits at k = 5 against 1.03 expected by chance, p = 0.025.
+
+**Real data awaiting curation** gets an arbitrary but reproducible stand-in:
+
+```python
+from onset_hfo.cohort import placeholder_labels
+labels = placeholder_labels("anon-01", ch_names, n_contacts=6)   # source="placeholder"
+```
+
+These contacts are chosen **independently of the signal**, on purpose. A
+stand-in that quietly correlated with what the detector finds would make every
+downstream number look encouraging for no reason, which is worse than having
+no labels at all.
+
+Both carry `is_placeholder = True`, both fail `trustworthy`, and the warning
+travels into every score's JSON — a stand-in that reaches a results table
+unmarked makes the table worthless in a way nobody can detect afterwards.
+`soz_labels` itself never invents anything: asking for a stand-in is an
+explicit call, so the decision to work against made-up labels is always
+visible at a call site.
+
+From the command line:
+
+```bash
+# run the whole scoring path on stand-ins, and emit the CSV a centre fills in
+python -m onset_agent.orchestrate --synthetic --score --labels placeholder \
+    --write-label-template labels/our-centre.csv
+
+# ... they send it back filled in; that is the entire swap
+python -m onset_agent.orchestrate --synthetic --score --labels-csv labels/our-centre.csv
+```
+
+`--labels placeholder` never overrides real labels — it is a fallback for when
+there are none, and it says so when it declines.
+
 ### Using your own labels instead
 
 Everything downstream depends only on `SozLabels`, so a local cohort drops in

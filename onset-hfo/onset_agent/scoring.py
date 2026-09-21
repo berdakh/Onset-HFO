@@ -28,6 +28,18 @@ are carried into the output so they cannot be lost downstream:
   evidence that the detector is broken. ``docs/EVALUATION.md`` says the same
   thing about the original ranking, and it remains true here.
 
+Stand-in labels
+---------------
+:func:`onset_hfo.cohort.placeholder_labels` and
+:func:`~onset_hfo.cohort.labels_from_ground_truth` exist so this machinery can
+run before a clinical centre has sent anything. Scores computed against them
+are meaningless as results -- they demonstrate that the scorer works. Every
+:class:`RankingScore` therefore carries ``label_source``, ``trustworthy`` and
+``is_placeholder``, and a ``warning`` string that travels into every JSON file
+the score is written to. A stand-in that reaches a results table unmarked
+makes the table worthless in a way nobody can detect afterwards, so the flag
+is carried rather than checked once at the top.
+
 Nothing in this module, and nothing built on it, identifies a seizure onset
 zone for a patient. It scores a ranking against a record, retrospectively, on
 data whose outcome is already known.
@@ -58,13 +70,23 @@ class RankingScore:
     prevalence: float
     at_k: dict[int, dict] = field(default_factory=dict)
     note: str = ""
+    #: True when the labels were generated rather than observed. Carried into
+    #: every serialised score: a placeholder that reaches a results table
+    #: unmarked makes the table worthless in a way nobody can detect later.
+    is_placeholder: bool = False
+    warning: str = ""
 
     def as_dict(self) -> dict:
-        return {"subject": self.subject, "label_source": self.label_source,
-                "trustworthy_label": self.trustworthy, "n_ranked_channels": self.n_ranked,
-                "n_soz_channels": self.n_soz_channels,
-                "soz_prevalence": round(self.prevalence, 4),
-                "at_k": {str(k): v for k, v in self.at_k.items()}, "note": self.note}
+        payload = {"subject": self.subject, "label_source": self.label_source,
+                   "trustworthy_label": self.trustworthy,
+                   "is_placeholder": self.is_placeholder,
+                   "n_ranked_channels": self.n_ranked,
+                   "n_soz_channels": self.n_soz_channels,
+                   "soz_prevalence": round(self.prevalence, 4),
+                   "at_k": {str(k): v for k, v in self.at_k.items()}, "note": self.note}
+        if self.warning:
+            payload["warning"] = self.warning
+        return payload
 
 
 def score_ranking(channels: list[str], labels: SozLabels, ks=DEFAULT_KS,
@@ -85,7 +107,8 @@ def score_ranking(channels: list[str], labels: SozLabels, ks=DEFAULT_KS,
     soz = labels.soz_contacts
     score = RankingScore(subject=labels.subject, label_source=labels.source,
                          trustworthy=labels.trustworthy, n_ranked=len(channels),
-                         n_soz_channels=0, prevalence=0.0)
+                         n_soz_channels=0, prevalence=0.0,
+                         is_placeholder=labels.is_placeholder, warning=labels.warning)
     if not soz or not channels:
         score.note = ("no labelled contacts for this subject, or no channels were ranked; "
                       "nothing can be scored")
@@ -145,6 +168,8 @@ def compare_rungs(results: dict, labels: SozLabels, k: int = 5) -> list[dict]:
         cost = result.cost or {}
         rows.append({
             "rung": name,
+            "label_source": score.label_source,
+            "is_placeholder": score.is_placeholder,
             "n_tool_calls": cost.get("n_tool_calls", 0),
             "runtime_s": cost.get("runtime_s", 0.0),
             "n_channels_retested": result.n_retested,

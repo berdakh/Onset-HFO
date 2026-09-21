@@ -34,6 +34,27 @@ tree has ``sub-pt01`` while the spreadsheet says ``pt1``; it also has a
 separate, nearly empty ``sub-pt1``. :func:`normalize_subject` reconciles them
 by stripping the ``sub-`` prefix and the zero padding.
 
+Working before the real labels arrive
+------------------------------------
+A cohort that has not been curated yet has no labels at all, and neither does
+the simulator -- which would leave the entire scoring and ablation machinery
+untestable until a medical centre sends a spreadsheet. Two stand-ins fix that,
+and both are built so they cannot be mistaken for the real thing:
+
+* :func:`labels_from_ground_truth` -- for a synthetic recording, the contacts
+  events were actually implanted on. Not a guess: it is exactly right, which
+  makes it the only case where a *non-null* score proves the scorer works.
+* :func:`placeholder_labels` -- for real data with no labels yet. A seeded,
+  arbitrary set of contacts, marked ``source="placeholder"``, so the pipeline,
+  the ladder and every metric run end to end today and the numbers are
+  obviously meaningless.
+
+Both carry ``is_placeholder = True``, both fail ``trustworthy``, and
+:mod:`onset_agent.scoring` stamps a warning into every score computed against
+them. :func:`write_label_template` emits the CSV a centre fills in; dropping
+that file in via ``csv=`` replaces the stand-in everywhere at once, with no
+other change.
+
 Swapping in your own labels
 ---------------------------
 Everything downstream depends only on :class:`SozLabels`, so a local cohort
@@ -71,7 +92,21 @@ __all__ = [
     "load_labels_csv",
     "label_channels",
     "cohort_table",
+    "labels_from_ground_truth",
+    "placeholder_labels",
+    "write_label_template",
+    "PLACEHOLDER_SOURCES",
+    "LABEL_TEMPLATE_COLUMNS",
 ]
+
+#: Label sources that are NOT a clinician's judgement. A score computed
+#: against one of these is a check that the machinery runs, never a result.
+PLACEHOLDER_SOURCES = frozenset({"placeholder", "synthetic_truth"})
+
+#: The columns :func:`write_label_template` emits and :func:`load_labels_csv`
+#: reads. Keep them in sync: this CSV is the whole interface to a real cohort.
+LABEL_TEMPLATE_COLUMNS = ["subject", "soz_contacts", "engel", "ilae",
+                          "seizure_free", "site", "modality", "surgery_type"]
 
 #: Filename inside the archive. CC0, ~30 KB, one row per patient.
 CLINICAL_XLSX = "sourcedata/clinical_data_summary.xlsx"
@@ -197,6 +232,35 @@ class SozLabels:
         return bool(self.soz_contacts)
 
     @property
+    def is_placeholder(self) -> bool:
+        """True when these labels are a stand-in, not a clinician's judgement.
+
+        Checked by every consumer that reports a number. A placeholder exists
+        so the machinery can run before curation arrives; the moment one
+        reaches a results table unmarked, the table is worthless and nobody
+        can tell.
+        """
+        return self.source in PLACEHOLDER_SOURCES
+
+    @property
+    def warning(self) -> str:
+        """The sentence that must appear beside any score built on these."""
+        if self.source == "placeholder":
+            return ("PLACEHOLDER LABELS: these contacts were generated, not observed. "
+                    "Every score computed against them is meaningless and exists only to "
+                    "prove the pipeline runs. Replace with a real label CSV before "
+                    "quoting any number.")
+        if self.source == "synthetic_truth":
+            return ("SYNTHETIC GROUND TRUTH: these are the contacts events were implanted "
+                    "on in a simulation. Scores against them measure the scorer, not a "
+                    "detector's clinical performance.")
+        if self.source == "events_markers":
+            return ("WEAK LABELS: free-text contacts a reviewer typed during the seizure, "
+                    "not a curated seizure onset zone. Read agreement as mild encouragement "
+                    "and disagreement as uninformative.")
+        return ""
+
+    @property
     def trustworthy(self) -> bool:
         """True when the label is curated *and* the surgery worked.
 
@@ -204,14 +268,20 @@ class SozLabels:
         class: a contact the clinician called onset, in a patient who actually
         became seizure free. Everywhere else the label is a hypothesis.
         """
-        return self.usable and self.source == "clinical_summary" and self.seizure_free is True
+        return (self.usable and not self.is_placeholder
+                and self.source in ("clinical_summary", "local")
+                and self.seizure_free is True)
 
     def as_dict(self) -> dict:
-        return {"subject": self.subject, "n_soz_contacts": len(self.soz_contacts),
-                "soz_contacts": sorted(self.soz_contacts), "engel": self.engel,
-                "ilae": self.ilae, "seizure_free": self.seizure_free, "site": self.site,
-                "modality": self.modality, "surgery_type": self.surgery_type,
-                "source": self.source, "trustworthy": self.trustworthy}
+        payload = {"subject": self.subject, "n_soz_contacts": len(self.soz_contacts),
+                   "soz_contacts": sorted(self.soz_contacts), "engel": self.engel,
+                   "ilae": self.ilae, "seizure_free": self.seizure_free, "site": self.site,
+                   "modality": self.modality, "surgery_type": self.surgery_type,
+                   "source": self.source, "trustworthy": self.trustworthy,
+                   "is_placeholder": self.is_placeholder}
+        if self.warning:
+            payload["warning"] = self.warning
+        return payload
 
 
 # --------------------------------------------------------------------------
@@ -248,8 +318,14 @@ def soz_labels(subject: str, csv: str | Path | None = None,
 
     1. ``csv`` -- your own curated file (see :func:`load_labels_csv`);
     2. the archive's clinical summary;
-    3. ``recording.marked_contacts`` -- the free-text markers, if a
+    3. the recording's implanted ground truth, if it is synthetic;
+    4. ``recording.marked_contacts`` -- the free-text markers, if a
        :class:`~onset_hfo.datasets.Recording` is supplied.
+
+    Note what is *not* in that list: this function never invents labels. When
+    nothing is available it says so. Call :func:`placeholder_labels`
+    explicitly if you want a stand-in, so that the decision to work against
+    made-up labels is always visible at a call site.
 
     Never raises for a missing label: it returns ``source="none"`` and an
     empty contact set, so a cohort run can report coverage honestly instead of
@@ -285,6 +361,14 @@ def soz_labels(subject: str, csv: str | Path | None = None,
                 surgery_type=str(row.get("surgery_type") or ""),
                 source="clinical_summary")
 
+    # A synthetic recording knows exactly where it put its events, so use that
+    # rather than its ``marked_contacts``, which would be recorded as weak
+    # free-text markers and understate how good the label is.
+    if getattr(recording, "ground_truth", None) is not None:
+        truth = labels_from_ground_truth(recording)
+        if truth.usable:
+            return truth
+
     marked = list(getattr(recording, "marked_contacts", []) or [])
     if marked:
         return SozLabels(subject=subject,
@@ -303,7 +387,10 @@ def load_labels_csv(path: str | Path) -> dict[str, SozLabels]:
     This is the seam for a local cohort: produce this one file and every
     metric in the repository works on your patients.
     """
-    frame = pd.read_csv(path)
+    # ``comment="#"`` so the template's trailing notes round-trip: a centre
+    # that fills the file in and sends it back should not have to delete them.
+    frame = pd.read_csv(path, comment="#")
+    frame = frame[frame["subject"].notna()] if "subject" in frame.columns else frame
     missing = {"subject", "soz_contacts"} - set(frame.columns)
     if missing:
         raise ValueError(f"{path}: missing column(s) {', '.join(sorted(missing))}")
@@ -321,6 +408,133 @@ def load_labels_csv(path: str | Path) -> dict[str, SozLabels]:
             surgery_type=str(row.get("surgery_type") or ""),
             source="local")
     return out
+
+
+# --------------------------------------------------------------------------
+# Stand-in labels, for before the real ones exist
+# --------------------------------------------------------------------------
+
+
+def labels_from_ground_truth(recording, kind: str = "ripple", top_n: int | None = None,
+                             min_events: int = 2, min_fraction: float = 0.25) -> SozLabels:
+    """SOZ labels for a *synthetic* recording: the contacts events were implanted on.
+
+    This is not an estimate. The simulator knows exactly which contacts it put
+    ripples on, so these labels are correct by construction -- which makes
+    this the one case where a scoring run producing a *non-null* result tells
+    you the scorer works rather than telling you about a brain.
+
+    Parameters
+    ----------
+    recording:
+        A :class:`~onset_hfo.datasets.Recording` with ``ground_truth`` set.
+        Real recordings have none, and this returns empty labels for them
+        rather than inventing any.
+    kind:
+        Which implanted event type defines the label -- ``"ripple"`` by
+        default. Artifacts are never a label: the simulator implants them
+        precisely so the detector can be caught reporting them.
+    top_n:
+        Keep only the ``n`` busiest contacts. ``None`` applies the two rules
+        below instead.
+    min_events, min_fraction:
+        A contact is labelled when it carries at least ``min_events`` events
+        **and** at least ``min_fraction`` of the busiest contact's count. The
+        relative rule is what matters: the simulator gives its hot contacts
+        roughly ten times the rate of the rest, and an absolute floor alone
+        would sweep in every background contact that happened to get two
+        events, pushing the label prevalence to a third of all channels and
+        making any score against it meaningless.
+    """
+    truth = getattr(recording, "ground_truth", None)
+    subject = str(getattr(recording, "subject", "unknown"))
+    if truth is None or not len(truth):
+        return SozLabels(subject=subject, source="none")
+    rows = truth[truth["kind"] == kind]
+    if not len(rows):
+        return SozLabels(subject=subject, source="none")
+    counts = rows.groupby("contact").size().sort_values(ascending=False)
+    if top_n is not None:
+        counts = counts.head(int(top_n))
+    else:
+        floor = max(int(min_events), min_fraction * float(counts.iloc[0]))
+        counts = counts[counts >= floor]
+    return SozLabels(subject=subject,
+                     soz_contacts={str(c).upper() for c in counts.index},
+                     site="simulator", modality="synthetic",
+                     source="synthetic_truth")
+
+
+def placeholder_labels(subject: str, ch_names: list[str], n_contacts: int = 6,
+                       seed: int = 0) -> SozLabels:
+    """Arbitrary but reproducible stand-in labels, for real data awaiting curation.
+
+    The point is to unblock work, not to approximate anything. A medical
+    centre's spreadsheet can be months away; meanwhile the ablation ladder,
+    the permutation scoring and the whole reporting path need *some* label to
+    run against, and stubbing them out one call site at a time is how a
+    codebase ends up with two divergent paths.
+
+    So: pick ``n_contacts`` contacts from the channels actually present,
+    deterministically from ``seed``, and mark the result ``"placeholder"``.
+    Every consumer checks that flag. When the real labels arrive, write them
+    into the CSV :func:`write_label_template` produces and pass it as ``csv=``
+    -- nothing else changes.
+
+    These labels are chosen **independently of the signal**, on purpose. A
+    stand-in that quietly correlated with what the detector finds would make
+    every downstream number look encouraging for no reason, which is worse
+    than no labels at all.
+    """
+    import random
+
+    contacts: list[str] = []
+    for channel in ch_names:
+        for part in str(channel).split("-"):
+            part = part.strip().upper()
+            if part and part not in contacts:
+                contacts.append(part)
+    if not contacts:
+        return SozLabels(subject=subject, source="none")
+    chosen = random.Random(seed).sample(contacts, min(int(n_contacts), len(contacts)))
+    return SozLabels(subject=subject, soz_contacts=set(chosen), source="placeholder")
+
+
+def write_label_template(subject: str, ch_names: list[str], path: str | Path,
+                         labels: SozLabels | None = None) -> Path:
+    """Write the CSV a clinical centre fills in, prefilled with what is known.
+
+    This file *is* the interface to a real cohort. Handing a centre a one-row
+    CSV with the columns already named -- and, where a stand-in was used, the
+    placeholder contacts visible so they can be overwritten -- turns "send us
+    your labels" into a request with an unambiguous answer.
+
+    The contacts present in the recording are listed in a trailing comment so
+    whoever fills it in can see the exact spelling the pipeline expects.
+    """
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    labels = labels or SozLabels(subject=subject)
+    row = {
+        "subject": subject,
+        "soz_contacts": "; ".join(sorted(labels.soz_contacts)),
+        "engel": "" if labels.engel is None else labels.engel,
+        "ilae": "" if labels.ilae is None else labels.ilae,
+        "seizure_free": "" if labels.seizure_free is None else labels.seizure_free,
+        "site": labels.site, "modality": labels.modality,
+        "surgery_type": labels.surgery_type,
+    }
+    frame = pd.DataFrame([row], columns=LABEL_TEMPLATE_COLUMNS)
+    contacts = sorted({p.strip().upper() for ch in ch_names
+                       for p in str(ch).split("-") if p.strip()})
+    with path.open("w", newline="") as handle:
+        frame.to_csv(handle, index=False)
+        handle.write(f"# contacts present in this recording: {', '.join(contacts)}\n")
+        handle.write("# soz_contacts accepts clinician shorthand: \"TT1-6; AST1-2, mst1-2\"\n")
+        handle.write("# seizure_free: True for Engel I, False otherwise, blank if no resection\n")
+        if labels.is_placeholder:
+            handle.write(f"# {labels.warning}\n")
+    return path
 
 
 # --------------------------------------------------------------------------
