@@ -1,0 +1,60 @@
+[project]
+name = "onset-hfo"
+version = "0.1.0"
+description = "Onset-HFO: a first prototype for detecting high-frequency oscillations and interictal epileptiform discharges in public intracranial EEG, with an evidence-only agent on an open-weight model"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Brain-Machine Interfaces Lab, Nazarbayev University" }]
+keywords = ["ieeg", "hfo", "epilepsy", "ripples", "seizure", "mne", "agent", "llm"]
+dependencies = [
+    "mne>=1.6",
+    "numpy>=1.26,<3",
+    "scipy>=1.11",
+    "pandas>=2.1",
+    "matplotlib>=3.8",
+    "requests>=2.31",
+]
+
+[project.optional-dependencies]
+# Everything needed to run the tests and the linter.
+dev = ["pytest>=8", "ruff>=0.5"]
+# Run an open-weight model in-process (Colab). A server backend (Ollama, vLLM)
+# needs nothing extra: it speaks HTTP.
+llm = ["transformers>=4.44", "torch>=2.2", "accelerate>=0.33"]
+# Notebooks.
+notebook = ["jupyter>=1.0", "ipywidgets>=8.1"]
+
+[project.scripts]
+onset-hfo = "onset_hfo.cli:main"
+onset-agent = "onset_agent.cli:main"
+
+[project.urls]
+"Onset project" = "https://berdakh.github.io/onset/"
+"Dataset" = "https://openneuro.org/datasets/ds003029"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["onset_hfo", "onset_agent"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I", "UP", "B"]
+ignore = ["B008"]
+
+[tool.ruff.lint.per-file-ignores]
+# Notebooks are still linted for real errors (undefined names, unused imports);
+# only notebook-idiomatic style is exempt: imports beside the code that uses
+# them, and compact one-line plot styling.
+"notebooks/*.ipynb" = ["E401", "E402", "E701", "E702", "I001"]
+"tests/*" = ["E402"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+filterwarnings = ["ignore::DeprecationWarning"]

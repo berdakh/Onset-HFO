@@ -1,0 +1,171 @@
+"""Command line interface.
+
+    python -m onset_hfo.cli run --synthetic              # offline, labelled data
+    python -m onset_hfo.cli run                          # the public example slice
+    python -m onset_hfo.cli run --subject sub-pt01 --task ictal --run 01 \
+                               --start 50 --stop 110 --figures
+    python -m onset_hfo.cli evaluate --seeds 1 7 42      # measure the detectors
+    python -m onset_hfo.cli runs --subject sub-pt01      # what else is in the archive
+
+Every command prints where it wrote its results, because the agent
+(``python -m onset_agent.cli --results <dir>``) reads exactly that directory.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from pathlib import Path
+
+from onset_hfo.config import (
+    DEFAULT_RUN,
+    DEFAULT_SUBJECT,
+    DEFAULT_TASK,
+    DEFAULT_TSTART,
+    DEFAULT_TSTOP,
+    PIPELINE_VERSION,
+    RESULTS_DIR,
+    PipelineConfig,
+    ensure_dirs,
+)
+
+
+def _cmd_run(args: argparse.Namespace) -> int:
+    from onset_hfo.pipeline import run_pipeline
+
+    ensure_dirs()
+    if args.synthetic:
+        from onset_hfo.synthetic import make_synthetic_recording
+        recording = make_synthetic_recording(seed=args.seed, duration_s=args.duration)
+    else:
+        from onset_hfo.datasets import fetch_slice
+        recording = fetch_slice(subject=args.subject, task=args.task, run=args.run,
+                                t_start=args.start, t_stop=args.stop)
+
+    cfg = PipelineConfig()
+    cfg.top_k = args.top_k
+    result = run_pipeline(recording, cfg, with_spikes=not args.no_spikes,
+                          save_to=args.out or RESULTS_DIR)
+    out_dir = Path(args.out or RESULTS_DIR) / \
+        f"{recording.subject}_{recording.task}_run-{recording.run}"
+
+    if args.figures:
+        from onset_hfo.viz import save_all_figures
+        written = save_all_figures(result, out_dir / "figures")
+        print(f"[onset-hfo] {len(written)} figures in {out_dir / 'figures'}")
+
+    if recording.ground_truth is not None:
+        from onset_hfo.evaluate import evaluate_detections
+        print("\n[onset-hfo] synthetic ground truth is available, so scores can be computed:")
+        for name, events in result.events.items():
+            print("   " + evaluate_detections(events, recording.ground_truth, detector=name).summary())
+        if result.spikes:
+            print("   " + evaluate_detections(result.spikes, recording.ground_truth,
+                                              detector="spike", kind="spike").summary())
+
+    print("\n" + result.report.to_markdown().split("## Findings")[0])
+    print(f"[onset-hfo] full report: {out_dir / 'report.md'}")
+    print(f"[onset-hfo] ask the agent about it:  "
+          f"python -m onset_agent.cli --results {out_dir} "
+          f"--question 'which channels have the highest ripple rate?'")
+    return 0
+
+
+def _cmd_evaluate(args: argparse.Namespace) -> int:
+    """Measure the detectors against synthetic ground truth, over several seeds."""
+    import pandas as pd
+
+    from onset_hfo.evaluate import evaluate_detections, validation_benefit
+    from onset_hfo.pipeline import run_pipeline
+    from onset_hfo.synthetic import make_synthetic_recording
+
+    rows = []
+    for seed in args.seeds:
+        rec = make_synthetic_recording(seed=seed, duration_s=args.duration, verbose=False)
+        result = run_pipeline(rec, verbose=False)
+        for name, events in result.events.items():
+            res = evaluate_detections(events, rec.ground_truth, detector=name)
+            rows.append({"seed": seed, **res.as_dict()})
+        if result.spikes:
+            res = evaluate_detections(result.spikes, rec.ground_truth, detector="spike", kind="spike")
+            rows.append({"seed": seed, **res.as_dict()})
+        if args.verbose:
+            print(f"seed {seed}:")
+            print(validation_benefit(result.events["rms"], rec.ground_truth).to_string(index=False))
+    table = pd.DataFrame(rows)
+    summary = table.groupby(["detector", "kind"])[["precision", "recall", "f1"]].agg(["mean", "std"])
+    print("\n[onset-hfo] scores over seeds " + ", ".join(str(s) for s in args.seeds))
+    print(summary.round(3).to_string())
+    if args.out:
+        Path(args.out).parent.mkdir(parents=True, exist_ok=True)
+        table.to_csv(args.out, index=False)
+        print(f"[onset-hfo] per-seed scores written to {args.out}")
+    return 0
+
+
+def _cmd_runs(args: argparse.Namespace) -> int:
+    from onset_hfo.datasets import list_runs
+
+    table = list_runs(args.subject)
+    print(table.to_string(index=False) if len(table) else "no runs found")
+    return 0
+
+
+def _cmd_report(args: argparse.Namespace) -> int:
+    from onset_hfo.store import ResultStore
+
+    store = ResultStore(args.results)
+    print(json.dumps(store.metadata(), indent=2))
+    print((Path(args.results) / "report.md").read_text())
+    return 0
+
+
+def build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(prog="onset-hfo", description=__doc__,
+                                formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("--version", action="version", version=f"onset-hfo {PIPELINE_VERSION}")
+    sub = p.add_subparsers(dest="command", required=True)
+
+    run = sub.add_parser("run", help="run the detection pipeline on one recording")
+    run.add_argument("--synthetic", action="store_true",
+                     help="use the labelled synthetic recording instead of the public archive")
+    run.add_argument("--subject", default=DEFAULT_SUBJECT)
+    run.add_argument("--task", default=DEFAULT_TASK)
+    run.add_argument("--run", default=DEFAULT_RUN)
+    run.add_argument("--start", type=float, default=DEFAULT_TSTART,
+                     help="start of the slice, seconds into the recording")
+    run.add_argument("--stop", type=float, default=DEFAULT_TSTOP)
+    run.add_argument("--duration", type=float, default=120.0,
+                     help="length of the synthetic recording, seconds")
+    run.add_argument("--seed", type=int, default=7, help="synthetic recording seed")
+    run.add_argument("--top-k", type=int, default=5)
+    run.add_argument("--no-spikes", action="store_true", help="skip the discharge detector")
+    run.add_argument("--figures", action="store_true", help="also render the standard figures")
+    run.add_argument("--out", default=None, help=f"output directory (default: {RESULTS_DIR})")
+    run.set_defaults(func=_cmd_run)
+
+    ev = sub.add_parser("evaluate", help="score the detectors against synthetic ground truth")
+    ev.add_argument("--seeds", type=int, nargs="+", default=[1, 7, 42])
+    ev.add_argument("--duration", type=float, default=120.0)
+    ev.add_argument("--out", default=None, help="write per-seed scores to this CSV")
+    ev.add_argument("--verbose", action="store_true")
+    ev.set_defaults(func=_cmd_evaluate)
+
+    runs = sub.add_parser("runs", help="list the runs available for a subject in the archive")
+    runs.add_argument("--subject", default=DEFAULT_SUBJECT)
+    runs.set_defaults(func=_cmd_runs)
+
+    rep = sub.add_parser("report", help="print a saved report")
+    rep.add_argument("results", help="a results directory written by 'run'")
+    rep.set_defaults(func=_cmd_report)
+    return p
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    return args.func(args)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

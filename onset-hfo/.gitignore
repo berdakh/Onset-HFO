@@ -1,0 +1,10 @@
+artifacts/
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+.pytest_cache/
+.ruff_cache/
+.venv/
+
+# The repository root ignores *.png; the documentation figures are wanted.
+!docs/img/*.png
