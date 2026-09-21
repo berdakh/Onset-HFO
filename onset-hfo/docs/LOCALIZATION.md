@@ -129,6 +129,58 @@ exactly backwards. The test suite pins both regimes.
 
 ---
 
+## 2b. Personalisation: what does a clinician's handful of labels buy?
+
+The within-subject ceiling is a real number and an unusable system: to train
+on some of a patient's contacts you must already know which are SOZ. But there
+is a non-circular version of the same idea, and it is clinically ordinary. A
+reviewer looking at a new implantation can point at a few contacts they are
+confident about. What does that buy?
+
+```bash
+python -m onset_hfo.learn personalize
+```
+
+Leave-one-patient-out, except the target patient first contributes `k`
+labelled contacts, chosen **before anything is predicted** and scored only on
+the contacts the model was *not* given. At `k = 0` it is exactly
+leave-one-patient-out, which makes the two ends of the curve comparable by
+construction rather than by assertion.
+
+Logistic regression, raw features, five label draws per patient (which
+contacts a clinician happens to label is a lottery, and with five of them it
+is a wide one):
+
+| labels | fraction of the implantation | AUPRC | gap closed | AUROC |
+|---|---|---|---|---|
+| 0 *(= LOPO)* | 0% | 0.455 | 0% | 0.744 |
+| 1 | 1.5% | 0.470 | 8% | 0.748 |
+| 2 | 3% | 0.490 | 17% | 0.761 |
+| **5** | **7.5%** | **0.531** | **38%** | 0.781 |
+| 10 | 15% | 0.555 | 50% | 0.797 |
+| 20 | 30% | 0.590 | 67% | 0.822 |
+| 40 | 60% | 0.655 | 100% | 0.856 |
+
+**Five contacts — under a tenth of the implantation — closes 38% of the gap
+between a model that has never seen the patient and one that has seen all of
+them.** Ten closes half. That is the most encouraging result in this
+repository, and it is the one that says where the effort should go: not into
+squeezing the last transferable feature out of a cohort, but into a workflow
+where the clinician's existing opinion enters the model cheaply.
+
+Two cautions. `labelled_fraction` is there because "40 labels" sounds modest
+until it is 60% of the electrodes. And **precision@5 is not monotone along
+this curve** (0.573, 0.609, 0.609, 0.582, 0.609, 0.627, 0.546) — with 22
+patients it is a noisy statistic and AUPRC is the one to read.
+
+The labels are sampled **blind to the features**, stratified so the draw
+usually contains at least one of each class. Sampling the highest-rate
+contacts instead would leak the model's own opinion back into its training set
+and inflate every point on the curve; a test asserts the sampler never sees a
+feature value.
+
+---
+
 ## 3. Calibration and conformal prediction
 
 ```bash
@@ -243,6 +295,7 @@ python -m onset_hfo.learn evaluate                # works immediately
 python -m onset_hfo.learn cohort --dry-run        # plan, download nothing
 python -m onset_hfo.learn cohort                  # build the feature table
 python -m onset_hfo.learn evaluate                # the table in §2
+python -m onset_hfo.learn personalize            # the label-budget curve in §2b
 python -m onset_hfo.learn uncertainty             # calibration + conformal + stress test
 python -m onset_hfo.learn fit --holdout sub-pt01 --out artifacts/models/soz.pkl
 ```
@@ -265,5 +318,7 @@ python -m onset_hfo.learn fit --holdout sub-pt01 --out artifacts/models/soz.pkl
   repair it.
 
 The nearest honest summary: the features carry real information about which
-contacts a clinician named, most of it does not transfer between patients, and
-the machinery to measure both of those facts now exists and is tested.
+contacts a clinician named, most of it does not transfer between patients, a
+handful of labels from the patient in front of you recovers a good part of
+what is lost, and the machinery to measure all three of those facts now exists
+and is tested.

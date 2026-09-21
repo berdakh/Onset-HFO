@@ -146,6 +146,36 @@ def _cmd_uncertainty(args) -> int:
     return 0
 
 
+def _cmd_personalize(args) -> int:
+    from onset_hfo.models import evaluate, label_budget_curve
+
+    features = _load_features(args.cohort)
+    budgets = tuple(int(b) for b in args.budgets.split(","))
+    curve = label_budget_curve(features, budgets=budgets, model=args.model,
+                               normalisation=args.normalisation,
+                               n_repeats=args.repeats, seed=args.seed)
+    ceiling = evaluate(features, args.model, args.normalisation,
+                       "within_subject").summary()
+
+    columns = [c for c in ["n_labels", "labelled_fraction", "auprc", "gap_closed",
+                           "auprc_lift_over_prevalence", "auroc", "precision_at_5",
+                           "auprc_per_patient_median"] if c in curve.columns]
+    pd.set_option("display.width", 200)
+    print(f"[learn] {args.model} / {args.normalisation}, "
+          f"{args.repeats} label draws per patient\n")
+    print(curve[columns].to_string(index=False))
+    print(f"\nwithin-subject ceiling: auprc={ceiling['auprc']}  "
+          f"precision_at_5={ceiling['precision_at_5']}  (needs every label)")
+    print("\n[learn] n_labels=0 IS leave-one-patient-out, so the two ends of this curve "
+          "are comparable by construction. labelled_fraction is what you are actually "
+          "asking a clinician for: read it before believing a budget is modest.")
+    out = Path(args.out or (Path(args.cohort) / "label_budget.csv"))
+    out.parent.mkdir(parents=True, exist_ok=True)
+    curve.to_csv(out, index=False)
+    print(f"[learn] written to {out}")
+    return 0
+
+
 def _cmd_fit(args) -> int:
     from onset_hfo.models import fit_soz_model
 
@@ -182,16 +212,27 @@ def main(argv: list[str] | None = None) -> int:
 
     for name, func, help_text in [
             ("evaluate", _cmd_evaluate, "score the models and the untrained baselines"),
+            ("personalize", _cmd_personalize,
+             "how much does letting a clinician label k contacts buy?"),
             ("uncertainty", _cmd_uncertainty, "calibration, conformal coverage, stress test"),
             ("fit", _cmd_fit, "fit a deployable model with a conformal threshold")]:
         p = sub.add_parser(name, help=help_text)
         p.add_argument("--cohort", default=str(DEFAULT_COHORT))
-        p.add_argument("--model", default="all" if name == "evaluate" else "gradient_boosting")
+        p.add_argument("--model",
+                       default={"evaluate": "all", "personalize": "logistic"}.get(
+                           name, "gradient_boosting"))
         p.add_argument("--normalisation", default="raw", choices=["raw", "z", "rank"])
         p.add_argument("--out", default=None)
         if name != "evaluate":
-            p.add_argument("--alpha", type=float, default=0.1)
             p.add_argument("--seed", type=int, default=0)
+        if name in ("uncertainty", "fit"):
+            p.add_argument("--alpha", type=float, default=0.1)
+        if name == "personalize":
+            p.add_argument("--budgets", default="0,1,2,5,10,20,40",
+                           help="comma-separated label budgets; 0 is leave-one-patient-out")
+            p.add_argument("--repeats", type=int, default=5,
+                           help="label draws per patient (which contacts a clinician "
+                                "happens to label is a lottery)")
         if name == "fit":
             p.add_argument("--holdout", default=None,
                            help="comma-separated subjects to exclude from BOTH fitting and "

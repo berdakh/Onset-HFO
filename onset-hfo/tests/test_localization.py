@@ -25,7 +25,9 @@ from onset_hfo.models import (
     baseline_scores,
     build_design_matrix,
     evaluate,
+    evaluate_personalized,
     fit_soz_model,
+    label_budget_curve,
 )
 from onset_hfo.uncertainty import (
     calibrate,
@@ -418,3 +420,82 @@ def test_every_model_spec_builds(cohort):
     for name in MODELS:
         result = evaluate(cohort, name, "rank", "lopo")
         assert np.isfinite(result.scores).any()
+
+
+# --------------------------------------------------------------------------
+# Personalisation: the deployable form of a subject-specific model
+# --------------------------------------------------------------------------
+
+
+def test_zero_labels_is_exactly_leave_one_patient_out(cohort):
+    """The two ends of the budget curve must be comparable by construction,
+    not by assertion, or the curve compares two different experiments."""
+    lopo = evaluate(cohort, "logistic", "rank", "lopo")
+    none = evaluate_personalized(cohort, n_labels=0, model="logistic", normalisation="rank")
+    assert np.allclose(lopo.scores, none.scores, equal_nan=True)
+    assert "zero labels" in none.note
+
+
+def test_the_model_is_never_scored_on_a_contact_it_was_given(cohort):
+    """Scoring a contact whose label you handed over is not a prediction."""
+    result = evaluate_personalized(cohort, n_labels=5, model="logistic",
+                                   normalisation="rank", n_repeats=1)
+    for fold in result.folds:
+        assert fold.n_test + 5 <= (result.groups == fold.fold.split("#")[0]).sum()
+
+
+def test_more_labels_help(rich_cohort):
+    few = evaluate_personalized(rich_cohort, 2, "logistic", "rank", n_repeats=3).metrics()
+    many = evaluate_personalized(rich_cohort, 30, "logistic", "rank", n_repeats=3).metrics()
+    assert many["auprc"] > few["auprc"]
+
+
+def test_personalisation_climbs_towards_the_within_subject_ceiling(rich_cohort):
+    floor = evaluate(rich_cohort, "logistic", "rank", "lopo").metrics()["auprc"]
+    ceiling = evaluate(rich_cohort, "logistic", "rank", "within_subject").metrics()["auprc"]
+    middle = evaluate_personalized(rich_cohort, 30, "logistic", "rank",
+                                   n_repeats=3).metrics()["auprc"]
+    assert floor < middle <= ceiling + 0.05
+
+
+def test_labels_are_sampled_blind_to_the_features(cohort):
+    """Sampling the highest-rate contacts would leak the model's own opinion
+    back into its training set and inflate every point on the curve."""
+    import inspect
+
+    from onset_hfo.models import _sample_labels
+
+    source = inspect.getsource(_sample_labels)
+    assert "X" not in source.split('"""')[2], "the sampler must not see feature values"
+    rng = np.random.default_rng(0)
+    y = np.array([1] * 10 + [0] * 40)
+    chosen = _sample_labels(y, 5, rng)
+    assert len(chosen) == 5 and len(set(chosen)) == 5
+    assert y[chosen].sum() >= 1, "a stratified sample should contain a positive"
+
+
+def test_asking_for_more_labels_than_exist_returns_everything():
+    from onset_hfo.models import _sample_labels
+
+    y = np.array([1, 0, 1])
+    assert len(_sample_labels(y, 99, np.random.default_rng(0))) == 3
+
+
+def test_the_budget_curve_reports_what_it_costs_the_clinician(cohort):
+    curve = label_budget_curve(cohort, budgets=(0, 5), model="logistic",
+                               normalisation="rank", n_repeats=2)
+    assert list(curve["n_labels"]) == [0, 5]
+    # 40 contacts sounds modest until it is 60% of the electrodes.
+    assert curve["labelled_fraction"].iloc[0] == 0.0
+    assert 0 < curve["labelled_fraction"].iloc[1] < 1
+    # gap_closed is present but null on this fixture: its within-subject folds
+    # are starved, so the "ceiling" sits below the floor and there is no gap.
+    assert "gap_closed" in curve.columns
+    assert curve["gap_closed"].isna().all()
+
+
+def test_the_gap_closed_column_is_filled_when_there_is_a_gap(rich_cohort):
+    curve = label_budget_curve(rich_cohort, budgets=(0, 30), model="logistic",
+                               normalisation="rank", n_repeats=2)
+    assert curve["gap_closed"].iloc[0] == 0.0
+    assert curve["gap_closed"].iloc[1] > 0

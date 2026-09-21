@@ -28,6 +28,7 @@ features = pd.read_csv("data/cohort/features.csv.gz")
 | `plan.csv` | what the runner decided to analyse, and the seizure marker it found |
 | `failures.csv` | the 9 subjects it could not analyse, with the reason for each |
 | `evaluation.csv` | the table in `docs/LOCALIZATION.md` §2 |
+| `label_budget.csv` | the personalisation curve in `docs/LOCALIZATION.md` §2b |
 | `summary.json` | counts per site |
 
 **Read `failures.csv`.** Four subjects were excluded because their recordings

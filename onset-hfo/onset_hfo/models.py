@@ -68,7 +68,7 @@ import pandas as pd
 
 __all__ = ["ModelSpec", "FoldResult", "EvaluationResult", "MODELS", "NORMALISATIONS",
            "build_design_matrix", "evaluate", "baseline_scores", "SozModel",
-           "fit_soz_model"]
+           "fit_soz_model", "evaluate_personalized", "label_budget_curve"]
 
 #: How features are scaled before a model sees them. The choice matters more
 #: than the choice of classifier: raw rates differ ten-fold between subjects
@@ -530,3 +530,171 @@ def fit_soz_model(features: pd.DataFrame, model: str = "gradient_boosting",
         held_out=sorted({holdout} if isinstance(holdout, str) else set(holdout or [])),
         protocol_note=(f"fitted on {len(patients) - len(cal_patients)} patients, "
                        f"calibrated on {len(cal_patients)} held out at alpha={alpha}"))
+
+
+# --------------------------------------------------------------------------
+# Personalisation: how many labels does a new patient actually need?
+# --------------------------------------------------------------------------
+
+
+def evaluate_personalized(features: pd.DataFrame, n_labels: int = 5,
+                          model: str = "logistic", normalisation: str = "rank",
+                          target_weight: float = 20.0, n_repeats: int = 5,
+                          seed: int = 0) -> EvaluationResult:
+    """Leave-one-patient-out, but the clinician first labels ``n_labels`` contacts.
+
+    This is the deployable form of a subject-specific model, and the
+    difference from :func:`evaluate` with ``protocol="within_subject"`` is the
+    whole point.
+
+    A within-subject fold trains on a random split of the target patient's
+    contacts, which presumes you already know which of them are SOZ -- the
+    question you are asking. It is a ceiling, not a system. Here the target
+    patient contributes only ``n_labels`` contacts, chosen before anything is
+    predicted, and the model is scored on **every contact it was not given**.
+    Nothing circular happens: a clinician looking at a new implantation can
+    genuinely point at a few contacts, and this measures what that buys.
+
+    ``n_labels=0`` is exactly leave-one-patient-out, which makes the two ends
+    of the curve comparable by construction rather than by assertion.
+
+    Parameters
+    ----------
+    target_weight:
+        How much each labelled contact from the target patient counts
+        relative to a contact from the cohort. It has to be large: five
+        contacts against a thousand would otherwise vanish into the average,
+        and the experiment would measure nothing. Twenty is not tuned -- it is
+        the order of magnitude that makes the target patient's handful weigh
+        about as much as one other patient.
+    n_repeats:
+        Which contacts the clinician happens to label is a lottery, and with
+        five of them it is a wide one. Each patient is re-sampled this many
+        times and the scores averaged, so the curve reports a typical
+        clinician rather than a lucky one.
+    """
+    from sklearn.impute import SimpleImputer
+
+    spec = MODELS[model]
+    X, y, groups, _sites, _names = build_design_matrix(features, normalisation)
+    accumulated = np.zeros(len(y))
+    counts = np.zeros(len(y))
+    folds: list[FoldResult] = []
+    rng = np.random.default_rng(seed)
+
+    for target in sorted(set(groups)):
+        target_rows = np.flatnonzero(groups == target)
+        cohort_rows = np.flatnonzero(groups != target)
+        if len(set(y[cohort_rows].tolist())) < 2:
+            continue
+        for repeat in range(max(1, n_repeats) if n_labels else 1):
+            given = _sample_labels(y[target_rows], n_labels, rng)
+            held = np.setdiff1d(np.arange(len(target_rows)), given)
+            if not len(held):
+                continue
+            train = np.concatenate([cohort_rows, target_rows[given]]) if len(given) \
+                else cohort_rows
+            weights = np.concatenate([
+                np.ones(len(cohort_rows)),
+                np.full(len(given), float(target_weight))]) if len(given) \
+                else np.ones(len(cohort_rows))
+
+            imputer = SimpleImputer(strategy="median", keep_empty_features=True)
+            estimator = spec.build()
+            _fit_with_weights(estimator, imputer.fit_transform(X[train]), y[train], weights)
+            predicted = estimator.predict_proba(imputer.transform(X[target_rows[held]]))[:, 1]
+
+            accumulated[target_rows[held]] += predicted
+            counts[target_rows[held]] += 1
+            folds.append(FoldResult(f"{target}#{repeat}", len(train), len(held),
+                                    int(y[target_rows[held]].sum()), predicted,
+                                    y[target_rows[held]], target_rows[held]))
+
+    scores = np.divide(accumulated, counts, out=np.full(len(y), np.nan), where=counts > 0)
+    return EvaluationResult(
+        model=f"{model}+{n_labels}labels", normalisation=normalisation,
+        protocol=f"personalized_{n_labels}", scores=scores, truth=y, groups=groups,
+        folds=folds,
+        note=(f"leave-one-patient-out plus {n_labels} contact label(s) from the target "
+              f"patient, averaged over {n_repeats} draws; scored only on contacts the "
+              f"model was not given" if n_labels else
+              "leave-one-patient-out (zero labels from the target patient)"))
+
+
+def _sample_labels(y_target: np.ndarray, n_labels: int, rng) -> np.ndarray:
+    """Pick the contacts a clinician labels: a realistic, not a helpful, sample.
+
+    Stratified so the sample usually contains at least one of each class --
+    a clinician pointing at contacts would not hand over five negatives and
+    call it a day -- but otherwise uniform. Deliberately *not* chosen by
+    feature value: sampling the highest-rate contacts would leak the model's
+    own opinion back into its training set and inflate every point on the
+    curve.
+    """
+    if n_labels <= 0:
+        return np.array([], dtype=int)
+    positives = np.flatnonzero(y_target == 1)
+    negatives = np.flatnonzero(y_target == 0)
+    if n_labels >= len(y_target):
+        return np.arange(len(y_target))
+    n_pos = max(1, int(round(n_labels * len(positives) / max(1, len(y_target)))))
+    n_pos = min(n_pos, len(positives), n_labels - 1 if len(negatives) else n_labels)
+    n_neg = min(n_labels - n_pos, len(negatives))
+    chosen = np.concatenate([
+        rng.choice(positives, size=n_pos, replace=False) if n_pos > 0 else np.array([], int),
+        rng.choice(negatives, size=n_neg, replace=False) if n_neg > 0 else np.array([], int)])
+    return chosen.astype(int)
+
+
+def _fit_with_weights(estimator, X, y, weights) -> None:
+    """Fit with sample weights, through a pipeline if necessary."""
+    try:
+        if hasattr(estimator, "steps"):          # sklearn Pipeline
+            final = estimator.steps[-1][0]
+            estimator.fit(X, y, **{f"{final}__sample_weight": weights})
+        else:
+            estimator.fit(X, y, sample_weight=weights)
+    except (TypeError, ValueError):
+        estimator.fit(X, y)                      # model does not support weights
+
+
+def label_budget_curve(features: pd.DataFrame, budgets=(0, 2, 5, 10, 20),
+                       model: str = "logistic", normalisation: str = "rank",
+                       n_repeats: int = 5, seed: int = 0) -> pd.DataFrame:
+    """Score against the number of contacts the clinician labels first.
+
+    The curve's two ends are the two numbers that already exist: at zero
+    labels it *is* leave-one-patient-out, and as the budget approaches the
+    whole implantation it approaches the within-subject ceiling. What is new
+    is the middle -- the part that says whether the gap between them is
+    reachable with an amount of clinician attention anyone would actually
+    give.
+    """
+    contacts_per_patient = float(
+        features.groupby("subject").size().median()) if len(features) else float("nan")
+    # The right-hand end of the curve. When the within-subject folds are too
+    # small to fit, this comes out below the zero-label score and there is no
+    # gap to report a fraction of -- see the starvation caveat above.
+    ceiling = evaluate(features, model, normalisation, "within_subject").metrics()["auprc"]
+    floor = None
+    rows = []
+    for budget in budgets:
+        result = evaluate_personalized(features, n_labels=int(budget), model=model,
+                                       normalisation=normalisation,
+                                       n_repeats=n_repeats, seed=seed)
+        summary = result.summary()
+        summary["n_labels"] = int(budget)
+        # How much of the implantation the clinician is being asked to label.
+        # 40 contacts sounds modest until it is 60% of the electrodes.
+        summary["labelled_fraction"] = (round(budget / contacts_per_patient, 3)
+                                        if contacts_per_patient else None)
+        if floor is None:
+            floor = summary["auprc"]
+        # Explicitly None rather than absent when there is no gap to close:
+        # on a cohort whose within-subject folds are starved the ceiling sits
+        # *below* the floor, and a silently missing column reads as a bug.
+        summary["gap_closed"] = (
+            round((summary["auprc"] - floor) / (ceiling - floor), 3)
+            if ceiling and floor is not None and ceiling > floor else None)
+        rows.append(summary)
+    return pd.DataFrame(rows)

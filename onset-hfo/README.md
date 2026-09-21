@@ -70,7 +70,7 @@ python -m onset_hfo.learn uncertainty        # calibration, conformal coverage
 # 7. measure the detectors against known truth
 python -m onset_hfo.cli evaluate --seeds 1 7 42
 
-pytest -q        # 156 tests, all offline, ~19 seconds
+pytest -q        # 164 tests, all offline, ~21 seconds
 ```
 
 ## What it actually does
@@ -161,6 +161,20 @@ above both: the features *are* separable inside a recording, and most of that
 does not survive the move to a new patient. **That gap is the result.** Changing
 hospital costs almost nothing on top of changing patient, which says the
 normalisation problem is at the patient level.
+
+The ceiling is not reachable on its own — it needs labels you do not have. But
+a cheaper version of it is (`python -m onset_hfo.learn personalize`): let the
+clinician label a few contacts first, then predict the rest.
+
+| contacts the clinician labels | % of the implantation | AUPRC | gap to the ceiling closed |
+|---|---|---|---|
+| 0 *(= leave-one-patient-out)* | 0% | 0.455 | 0% |
+| 2 | 3% | 0.490 | 17% |
+| **5** | **7.5%** | **0.531** | **38%** |
+| 10 | 15% | 0.555 | 50% |
+
+Five contacts — under a tenth of the electrodes — recovers well over a third
+of what is lost moving to a new patient.
 
 ### And what the orchestration buys, honestly
 
