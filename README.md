@@ -9,13 +9,13 @@ Everything lives in [`onset-hfo/`](onset-hfo/). Start there:
 
 | | Notebook (runs in Colab, no setup) | What it shows |
 |---|---|---|
-| 1 | [HFO detection quickstart](https://colab.research.google.com/github/berdakh/bci-gan/blob/master/onset-hfo/notebooks/01_hfo_detection_quickstart.ipynb) | real public iEEG → detections → figures → a cited report |
-| 2 | [Agentic analysis](https://colab.research.google.com/github/berdakh/bci-gan/blob/master/onset-hfo/notebooks/02_agentic_analysis.ipynb) | an open-weight model answering questions about those results, with citations, refusals and guards |
-| 3 | [Validation and benchmark](https://colab.research.google.com/github/berdakh/bci-gan/blob/master/onset-hfo/notebooks/03_validation_and_benchmark.ipynb) | precision/recall against known truth, threshold curves, what each check buys |
+| 1 | [HFO detection quickstart](https://colab.research.google.com/github/berdakh/onset-hfo/blob/master/onset-hfo/notebooks/01_hfo_detection_quickstart.ipynb) | real public iEEG → detections → figures → a cited report |
+| 2 | [Agentic analysis](https://colab.research.google.com/github/berdakh/onset-hfo/blob/master/onset-hfo/notebooks/02_agentic_analysis.ipynb) | an open-weight model answering questions about those results, with citations, refusals and guards |
+| 3 | [Validation and benchmark](https://colab.research.google.com/github/berdakh/onset-hfo/blob/master/onset-hfo/notebooks/03_validation_and_benchmark.ipynb) | precision/recall against known truth, threshold curves, what each check buys |
 
 ```bash
-git clone https://github.com/berdakh/bci-gan.git
-cd bci-gan/onset-hfo
+git clone https://github.com/berdakh/onset-hfo.git
+cd onset-hfo/onset-hfo
 pip install -e ".[dev]"
 
 python -m onset_hfo.cli run --synthetic --figures   # offline, ~10 seconds

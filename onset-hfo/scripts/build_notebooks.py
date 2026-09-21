@@ -20,7 +20,7 @@ import json
 from pathlib import Path
 
 NOTEBOOK_DIR = Path(__file__).resolve().parent.parent / "notebooks"
-REPO = "https://github.com/berdakh/bci-gan.git"
+REPO = "https://github.com/berdakh/onset-hfo.git"
 BRANCH = "master"   # the repository default branch
 
 SETUP = f'''# Colab setup. On your own machine, skip this cell and run
@@ -30,10 +30,10 @@ IN_COLAB = "google.colab" in sys.modules
 REPO = "{REPO}"
 BRANCH = "{BRANCH}"   # change to the default branch once this work is merged
 
-if IN_COLAB and not os.path.exists("bci-gan"):
+if IN_COLAB and not os.path.exists("onset-hfo"):
     subprocess.run(["git", "clone", "-q", "--branch", BRANCH, "--depth", "1", REPO], check=True)
 if IN_COLAB:
-    os.chdir("/content/bci-gan/onset-hfo")
+    os.chdir("/content/onset-hfo/onset-hfo")
     subprocess.run([sys.executable, "-m", "pip", "install", "-q", "-e", "."], check=True)
 elif os.path.basename(os.getcwd()) == "notebooks":
     os.chdir("..")
@@ -76,7 +76,7 @@ def write(name: str, cells: list[dict]) -> Path:
 
 
 def badge(name: str) -> str:
-    url = f"https://colab.research.google.com/github/berdakh/bci-gan/blob/{BRANCH}/onset-hfo/notebooks/{name}"
+    url = f"https://colab.research.google.com/github/berdakh/onset-hfo/blob/{BRANCH}/onset-hfo/notebooks/{name}"
     return f"[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)]({url})"
 
 
