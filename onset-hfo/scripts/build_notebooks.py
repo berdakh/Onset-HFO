@@ -21,7 +21,7 @@ from pathlib import Path
 
 NOTEBOOK_DIR = Path(__file__).resolve().parent.parent / "notebooks"
 REPO = "https://github.com/berdakh/bci-gan.git"
-BRANCH = "claude/onset-hfo-detection-osujxo"
+BRANCH = "master"   # the repository default branch
 
 SETUP = f'''# Colab setup. On your own machine, skip this cell and run
 #   pip install -e ".[dev]"  from the onset-hfo directory instead.
