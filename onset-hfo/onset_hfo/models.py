@@ -68,7 +68,9 @@ import pandas as pd
 
 __all__ = ["ModelSpec", "FoldResult", "EvaluationResult", "MODELS", "NORMALISATIONS",
            "build_design_matrix", "evaluate", "baseline_scores", "SozModel",
-           "fit_soz_model", "evaluate_personalized", "label_budget_curve"]
+           "fit_soz_model", "evaluate_personalized", "label_budget_curve",
+           "evaluate_active_learning", "active_learning_comparison",
+           "ACQUISITION"]
 
 #: How features are scaled before a model sees them. The choice matters more
 #: than the choice of classifier: raw rates differ ten-fold between subjects
@@ -698,3 +700,169 @@ def label_budget_curve(features: pd.DataFrame, budgets=(0, 2, 5, 10, 20),
             if ceiling and floor is not None and ceiling > floor else None)
         rows.append(summary)
     return pd.DataFrame(rows)
+
+
+# --------------------------------------------------------------------------
+# Active learning: does it matter WHICH contacts the clinician labels?
+# --------------------------------------------------------------------------
+
+#: How the ``n_labels`` contacts are chosen from the patient in front of you.
+#: ``random`` is the control -- the assumption the label-budget curve makes.
+ACQUISITION = {
+    "random": "a stratified random draw: what the label-budget curve assumes",
+    "uncertainty": "the contacts the cohort model is least sure about (p nearest 0.5) -- "
+                   "textbook active learning",
+    "confident": "the contacts the cohort model ranks highest: what a clinician handed a "
+                 "ranking would look at first",
+    "rate": "the contacts with the highest ripple rate -- available today, needs no model",
+}
+
+
+def _acquire(strategy: str, pool: np.ndarray, probabilities: np.ndarray,
+             rates: np.ndarray, truth: np.ndarray, n_labels: int, rng) -> np.ndarray:
+    """Choose which contacts of the target patient get labelled."""
+    if n_labels <= 0 or not len(pool):
+        return np.array([], dtype=int)
+    n_labels = min(int(n_labels), len(pool))
+    if strategy == "random":
+        return _sample_labels(truth, n_labels, rng)
+    if strategy == "uncertainty":
+        order = np.argsort(np.abs(probabilities - 0.5))
+    elif strategy == "confident":
+        order = np.argsort(-probabilities)
+    elif strategy == "rate":
+        order = np.argsort(-np.nan_to_num(rates, nan=-np.inf))
+    else:
+        raise ValueError(f"strategy must be one of {', '.join(ACQUISITION)}")
+    return order[:n_labels]
+
+
+def evaluate_active_learning(features: pd.DataFrame, strategy: str = "random",
+                             n_labels: int = 5, model: str = "logistic",
+                             normalisation: str = "raw", eval_fraction: float = 0.5,
+                             target_weight: float = 20.0, n_repeats: int = 3,
+                             rate_column: str = "rms_rate_per_min",
+                             seed: int = 0) -> EvaluationResult:
+    """Leave-one-patient-out plus ``n_labels`` contacts chosen by ``strategy``.
+
+    The confound this is built around
+    --------------------------------
+    :func:`evaluate_personalized` scores the model on every contact it was not
+    given, which is correct when the labelled contacts are drawn at random.
+    The moment a *strategy* picks them it stops being correct, because each
+    strategy removes different contacts from what remains. Uncertainty
+    sampling takes the hard ones and leaves an easier test set; ranking by
+    probability takes the obvious positives and leaves a harder one. Comparing
+    strategies scored on their own leftovers compares four different exams.
+
+    So each patient's contacts are split once into a **fixed evaluation pool**
+    and a labelling pool, from the repeat's seed alone -- never from the
+    strategy. Every strategy chooses its labels from the same pool and is
+    scored on the same held-out contacts. The split is what makes the
+    comparison mean anything, and ``test_every_strategy_is_scored_on_the_same
+    _contacts`` pins it.
+
+    The cohort model that ranks the candidates is trained **without** the
+    target patient, so choosing what to label never sees that patient's
+    answers.
+    """
+    from sklearn.impute import SimpleImputer
+
+    if strategy not in ACQUISITION:
+        raise ValueError(f"strategy must be one of {', '.join(ACQUISITION)}")
+    spec = MODELS[model]
+    X, y, groups, _sites, _names = build_design_matrix(features, normalisation)
+    frame = features[features["is_soz"].notna()].copy()
+    frame = frame[frame.groupby("subject")["is_soz"].transform("sum") > 0]
+    rates_all = (frame[rate_column].to_numpy(dtype=float)
+                 if rate_column in frame.columns else np.full(len(y), np.nan))
+
+    accumulated = np.zeros(len(y))
+    counts = np.zeros(len(y))
+    folds: list[FoldResult] = []
+    cohort_cache: dict[str, tuple] = {}
+
+    for repeat in range(max(1, n_repeats)):
+        rng = np.random.default_rng(seed + repeat)
+        for target in sorted(set(groups)):
+            rows = np.flatnonzero(groups == target)
+            others = np.flatnonzero(groups != target)
+            if len(set(y[others].tolist())) < 2 or len(rows) < 4:
+                continue
+
+            # The candidate-ranking model never sees the target patient.
+            if target not in cohort_cache:
+                imputer = SimpleImputer(strategy="median", keep_empty_features=True)
+                estimator = spec.build()
+                estimator.fit(imputer.fit_transform(X[others]), y[others])
+                cohort_cache[target] = (estimator, imputer)
+            estimator, imputer = cohort_cache[target]
+
+            # One split per (patient, repeat), identical for every strategy.
+            split_rng = np.random.default_rng(hash((target, repeat, seed)) % (2**32))
+            shuffled = split_rng.permutation(len(rows))
+            n_eval = max(2, int(round(eval_fraction * len(rows))))
+            eval_local = np.sort(shuffled[:n_eval])
+            pool_local = np.sort(shuffled[n_eval:])
+            if not len(pool_local) or len(set(y[rows[eval_local]].tolist())) < 2:
+                continue
+
+            pool_rows = rows[pool_local]
+            probabilities = estimator.predict_proba(imputer.transform(X[pool_rows]))[:, 1]
+            chosen = _acquire(strategy, pool_local, probabilities, rates_all[pool_rows],
+                              y[pool_rows], n_labels, rng)
+            given = pool_rows[chosen] if len(chosen) else np.array([], dtype=int)
+
+            train = np.concatenate([others, given]) if len(given) else others
+            weights = np.concatenate([np.ones(len(others)),
+                                      np.full(len(given), float(target_weight))]) \
+                if len(given) else np.ones(len(others))
+            fold_imputer = SimpleImputer(strategy="median", keep_empty_features=True)
+            fold_model = spec.build()
+            _fit_with_weights(fold_model, fold_imputer.fit_transform(X[train]),
+                              y[train], weights)
+            held = rows[eval_local]
+            predicted = fold_model.predict_proba(fold_imputer.transform(X[held]))[:, 1]
+
+            accumulated[held] += predicted
+            counts[held] += 1
+            folds.append(FoldResult(f"{target}#{repeat}", len(train), len(held),
+                                    int(y[held].sum()), predicted, y[held], held))
+
+    scores = np.divide(accumulated, counts, out=np.full(len(y), np.nan), where=counts > 0)
+    keep = counts > 0
+    return EvaluationResult(
+        model=f"{model}+{n_labels}@{strategy}", normalisation=normalisation,
+        protocol=f"active_{strategy}_{n_labels}", scores=scores[keep], truth=y[keep],
+        groups=groups[keep], folds=folds,
+        note=(f"{n_labels} label(s) chosen by '{strategy}' ({ACQUISITION[strategy]}); "
+              f"scored on a fixed held-out pool identical across strategies"))
+
+
+def active_learning_comparison(features: pd.DataFrame, budgets=(2, 5, 10),
+                               strategies=tuple(ACQUISITION), model: str = "logistic",
+                               normalisation: str = "raw", n_repeats: int = 3,
+                               seed: int = 0) -> pd.DataFrame:
+    """Score every (strategy, budget) on the same held-out contacts.
+
+    ``lift_over_random`` is the column the experiment exists for: whether
+    choosing *which* contacts to label beats asking for any five. A strategy
+    that does not beat random is not worth the workflow it would require.
+    """
+    rows = []
+    for budget in budgets:
+        for strategy in strategies:
+            result = evaluate_active_learning(features, strategy=strategy,
+                                              n_labels=int(budget), model=model,
+                                              normalisation=normalisation,
+                                              n_repeats=n_repeats, seed=seed)
+            summary = result.summary()
+            summary["strategy"] = strategy
+            summary["n_labels"] = int(budget)
+            rows.append(summary)
+    table = pd.DataFrame(rows)
+    baseline = table[table["strategy"] == "random"].set_index("n_labels")["auprc"]
+    table["lift_over_random"] = [
+        round(row["auprc"] - baseline.get(row["n_labels"], float("nan")), 4)
+        if row["auprc"] is not None else None for _, row in table.iterrows()]
+    return table.sort_values(["n_labels", "auprc"], ascending=[True, False])

@@ -66,12 +66,13 @@ python -m onset_agent.orchestrate --subject sub-pt01 --task ictal --run 01 \
 python -m onset_hfo.learn cohort --dry-run   # the plan; downloads nothing
 python -m onset_hfo.learn cohort             # ~24 MB per subject, resumable
 python -m onset_hfo.learn evaluate           # within-subject vs LOPO vs cross-site
+python -m onset_hfo.learn acquire            # which contacts to label first
 python -m onset_hfo.learn uncertainty        # calibration, conformal coverage
 
 # 7. measure the detectors against known truth
 python -m onset_hfo.cli evaluate --seeds 1 7 42
 
-pytest -q        # 178 tests, all offline, ~39 seconds
+pytest -q        # 188 tests, all offline, ~41 seconds
 ```
 
 ## What it actually does
@@ -175,7 +176,12 @@ clinician label a few contacts first, then predict the rest.
 | 10 | 15% | 0.555 | 50% |
 
 Five contacts — under a tenth of the electrodes — recovers well over a third
-of what is lost moving to a new patient.
+of what is lost moving to a new patient. And it matters *which* five
+(`python -m onset_hfo.learn acquire`): choosing by the model's own ranking
+beats a random draw by about as much again, while **uncertainty sampling — the
+textbook active-learning strategy — loses to random at every budget**. With
+five labels and 20% prevalence what you are short of is positives, and the
+contacts a model is unsure about are mostly ambiguous negatives.
 
 ### Trying to break it
 

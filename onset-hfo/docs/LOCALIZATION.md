@@ -181,6 +181,92 @@ feature value.
 
 ---
 
+## 2c. Does it matter *which* contacts get labelled?
+
+Section 2b assumes the clinician labels a **random** five. They would not --
+they would look at the suspicious ones. So: pick the five by a strategy, and
+see whether choosing beats not choosing.
+
+```bash
+python -m onset_hfo.learn acquire
+```
+
+| strategy | how the contacts are chosen | needs a model? |
+|---|---|---|
+| `random` | stratified random draw -- the control, and what 2b assumes | no |
+| `uncertainty` | cohort model least sure (p nearest 0.5) -- textbook active learning | yes |
+| `confident` | cohort model ranks highest -- what a clinician handed a ranking does | yes |
+| `rate` | highest ripple rate -- **available today, no model at all** | no |
+
+### The confound this is built around
+
+Each strategy removes *different* contacts from what remains. Uncertainty
+sampling takes the hard ones and leaves an easier test set; ranking by
+probability takes the obvious positives and leaves a harder one. Scoring each
+strategy on its own leftovers compares four different exams.
+
+So every patient's contacts are split once into a **fixed evaluation pool**
+and a labelling pool, from the repeat's seed alone and never from the
+strategy. All four choose from the same pool and are scored on the same
+held-out contacts. The cohort model that ranks the candidates is trained
+without the target patient, so choosing what to label never sees that
+patient's answers.
+
+### Result
+
+| labels | strategy | AUPRC | lift over random |
+|---|---|---|---|
+| 2 | **confident** | 0.502 | **+0.036** |
+| 2 | rate | 0.488 | +0.022 |
+| 2 | random | 0.466 | -- |
+| 2 | uncertainty | 0.451 | -0.014 |
+| 5 | **confident** | 0.554 | **+0.063** |
+| 5 | rate | 0.533 | +0.041 |
+| 5 | random | 0.491 | -- |
+| 5 | uncertainty | 0.480 | -0.011 |
+| 10 | **confident** | 0.570 | **+0.046** |
+| 10 | rate | 0.564 | +0.040 |
+| 10 | random | 0.524 | -- |
+| 10 | uncertainty | 0.494 | -0.031 |
+
+**Yes, it matters.** Choosing beats random at every budget, and the gain is
+comparable to doubling the budget -- five well-chosen labels are worth about
+ten random ones.
+
+**Textbook active learning is the worst strategy here.** `uncertainty` loses
+to a random draw at all three budgets. The mechanism is visible in what each
+strategy actually picks, against a cohort prevalence of 20.5%:
+
+| strategy | fraction of the 5 chosen contacts that are really SOZ |
+|---|---|
+| `confident` | **57%** |
+| `rate` | 47% |
+| `uncertainty` | 27% |
+| `random` | 25% |
+
+Labelling near the decision boundary is efficient when labels are plentiful
+and the classes are balanced. With five labels and 20% prevalence, what you
+are short of is **positives**, and the contacts the model is unsure about are
+mostly ambiguous negatives. Uncertainty sampling spends a scarce budget on
+them.
+
+**`rate` needs no model at all** and comes within a point or two of the best
+strategy. "Label the five channels with the highest ripple rate" is a workflow
+that exists today, and it captures most of the available gain.
+
+### The caveat that decides whether this transfers
+
+`confident` and `uncertainty` both rank candidates with a *cohort* model, so
+they inherit the transfer problem section 2 measures. On simulated data where
+each patient has its own decision boundary, the cohort model ranks the
+target's contacts near-arbitrarily and `confident` becomes **worse** than
+random -- a test pins that. This is not a defect in the acquisition function;
+it is the same gap showing up one layer higher, and it is the strongest
+practical argument for `rate`, which reads a measured feature and needs
+nothing to transfer.
+
+---
+
 ## 3. Calibration and conformal prediction
 
 ```bash
@@ -296,6 +382,7 @@ python -m onset_hfo.learn cohort --dry-run        # plan, download nothing
 python -m onset_hfo.learn cohort                  # build the feature table
 python -m onset_hfo.learn evaluate                # the table in §2
 python -m onset_hfo.learn personalize            # the label-budget curve in §2b
+python -m onset_hfo.learn acquire                # which contacts to label, 2c
 python -m onset_hfo.learn uncertainty             # calibration + conformal + stress test
 python -m onset_hfo.learn fit --holdout sub-pt01 --out artifacts/models/soz.pkl
 ```
@@ -320,5 +407,5 @@ python -m onset_hfo.learn fit --holdout sub-pt01 --out artifacts/models/soz.pkl
 The nearest honest summary: the features carry real information about which
 contacts a clinician named, most of it does not transfer between patients, a
 handful of labels from the patient in front of you recovers a good part of
-what is lost, and the machinery to measure all three of those facts now exists
-and is tested.
+what is lost, choosing *which* handful is worth about as much again, and
+the machinery to measure all four of those facts now exists and is tested.

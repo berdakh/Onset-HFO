@@ -6,10 +6,13 @@
     # 2. the headline table: three protocols against the untrained baselines
     python -m onset_hfo.learn evaluate
 
-    # 3. calibration, conformal coverage, and the exchangeability stress test
+    # 3. does it matter WHICH contacts the clinician labels first?
+    python -m onset_hfo.learn acquire
+
+    # 4. calibration, conformal coverage, and the exchangeability stress test
     python -m onset_hfo.learn uncertainty
 
-    # 4. fit a deployable model, holding out the subject you will demonstrate on
+    # 5. fit a deployable model, holding out the subject you will demonstrate on
     python -m onset_hfo.learn fit --holdout sub-pt01 --out artifacts/models/soz.pkl
 
 The evaluation always scores the untrained rate baselines beside the models.
@@ -176,6 +179,36 @@ def _cmd_personalize(args) -> int:
     return 0
 
 
+def _cmd_acquire(args) -> int:
+    from onset_hfo.models import ACQUISITION, active_learning_comparison
+
+    features = _load_features(args.cohort)
+    budgets = tuple(int(b) for b in args.budgets.split(","))
+    table = active_learning_comparison(features, budgets=budgets, model=args.model,
+                                       normalisation=args.normalisation,
+                                       n_repeats=args.repeats, seed=args.seed)
+    print("strategies:")
+    for name, description in ACQUISITION.items():
+        print(f"  {name:12s} {description}")
+    print("\nEvery strategy is scored on the same held-out contacts: each patient's")
+    print("contacts are split once into an evaluation pool and a labelling pool, from")
+    print("the seed alone and never from the strategy. Without that the comparison")
+    print("would be four different exams.\n")
+
+    columns = [c for c in ["n_labels", "strategy", "auprc", "lift_over_random", "auroc",
+                           "precision_at_5", "n_patients"] if c in table.columns]
+    pd.set_option("display.width", 200)
+    print(table[columns].to_string(index=False))
+
+    out = Path(args.out or (Path(args.cohort) / "active_learning.csv"))
+    out.parent.mkdir(parents=True, exist_ok=True)
+    table.to_csv(out, index=False)
+    print(f"\n[learn] written to {out}")
+    print("[learn] lift_over_random is the column this exists for. A strategy that does "
+          "not beat a random draw is not worth the workflow it would require.")
+    return 0
+
+
 def _cmd_fit(args) -> int:
     from onset_hfo.models import fit_soz_model
 
@@ -214,19 +247,27 @@ def main(argv: list[str] | None = None) -> int:
             ("evaluate", _cmd_evaluate, "score the models and the untrained baselines"),
             ("personalize", _cmd_personalize,
              "how much does letting a clinician label k contacts buy?"),
+            ("acquire", _cmd_acquire,
+             "does it matter WHICH contacts the clinician labels?"),
             ("uncertainty", _cmd_uncertainty, "calibration, conformal coverage, stress test"),
             ("fit", _cmd_fit, "fit a deployable model with a conformal threshold")]:
         p = sub.add_parser(name, help=help_text)
         p.add_argument("--cohort", default=str(DEFAULT_COHORT))
         p.add_argument("--model",
-                       default={"evaluate": "all", "personalize": "logistic"}.get(
-                           name, "gradient_boosting"))
+                       default={"evaluate": "all", "personalize": "logistic",
+                                "acquire": "logistic"}.get(name, "gradient_boosting"))
         p.add_argument("--normalisation", default="raw", choices=["raw", "z", "rank"])
         p.add_argument("--out", default=None)
         if name != "evaluate":
             p.add_argument("--seed", type=int, default=0)
         if name in ("uncertainty", "fit"):
             p.add_argument("--alpha", type=float, default=0.1)
+        if name == "acquire":
+            p.add_argument("--budgets", default="2,5,10",
+                           help="comma-separated label budgets")
+            p.add_argument("--repeats", type=int, default=3,
+                           help="repeats; only the random strategy is stochastic, but the "
+                                "evaluation split varies with the seed")
         if name == "personalize":
             p.add_argument("--budgets", default="0,1,2,5,10,20,40",
                            help="comma-separated label budgets; 0 is leave-one-patient-out")
