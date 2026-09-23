@@ -13,13 +13,13 @@ ruff, pytest. Linux, CPU only, no GPU, no model weights downloaded.
 | Check | Command | Result |
 |---|---|---|
 | Lint | `ruff check .` | clean |
-| Tests | `pytest -q` | **174 passed** in ~38 s, fully offline |
+| Tests | `pytest -q` | **178 passed** in ~39 s, offline and *enforced* (`ONSET_HFO_OFFLINE`) |
 | Pipeline on synthetic data | `python -m onset_hfo.cli run --synthetic --figures` | completes in ~3 s; 6 figures written |
 | Pipeline on public data | `python -m onset_hfo.cli run --subject sub-pt01 --task ictal --run 01 --start 50 --stop 110 --figures` | 23.5 MB downloaded, 98 → 71 bipolar channels, **7.4 s** end to end |
 | Detector scores | `python -m onset_hfo.cli evaluate --seeds 1 7 42` | see below |
 | Agent, no model | `python -m onset_agent.cli --results <dir> --demo` | 5 answered, 3 refused, all citations resolve |
 | Agent, LLM protocol | `pytest tests/test_agent.py` | structured tool calls, tool calls in content, hallucinated number, fabricated citation, unknown tool — all handled as designed |
-| Notebooks | `jupyter nbconvert --execute` on all three | all execute top to bottom with no errors |
+| Notebooks | `jupyter nbconvert --execute` on all four | all execute top to bottom with no errors |
 
 ## Measured detector performance (synthetic ground truth, seeds 1, 7, 42)
 

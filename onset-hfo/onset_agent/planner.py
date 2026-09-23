@@ -188,6 +188,18 @@ class ConformalWidth(StopRule):
         current = self.width(store)
         if current is None:
             return False, ""
+        if current == 0:
+            # An empty candidate set is not a narrow one. It means the model
+            # found neither label plausible for any channel, which is what
+            # happens when it is applied outside the distribution it was
+            # fitted on -- a cohort model on a different montage, a different
+            # sampling rate, a simulation. Reporting that as "narrowed enough
+            # to act on" would turn the most obvious failure mode into the
+            # success condition, so it stops and says what happened.
+            return True, ("the conformal candidate set is EMPTY: the model ruled out every "
+                          "channel, which means it is being applied outside the "
+                          "distribution it was calibrated on, not that the recording was "
+                          "localized")
         if current <= self.max_width:
             return True, (f"the conformal candidate set is down to {current} channel(s), "
                           f"at or below the {self.max_width} needed to act on")

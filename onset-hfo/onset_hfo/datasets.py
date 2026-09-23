@@ -25,6 +25,7 @@ carries the data *and* the provenance needed to cite it later.
 from __future__ import annotations
 
 import json
+import os
 import re
 import warnings
 from collections.abc import Iterable
@@ -55,6 +56,8 @@ __all__ = [
     "seizure_marker_kind",
     "list_subjects",
     "read_tsv_text",
+    "OfflineError",
+    "offline",
 ]
 
 _BYTES_PER_SAMPLE = {"IEEE_FLOAT_32": 4, "INT_16": 2, "UINT_16": 2, "IEEE_FLOAT_64": 8}
@@ -194,8 +197,32 @@ class Recording:
 # --------------------------------------------------------------------------
 
 
+class OfflineError(RuntimeError):
+    """Raised instead of a network call when offline mode is on."""
+
+
+#: Set this environment variable to refuse every outbound request from this
+#: package. The test suite sets it for the whole session, because "these tests
+#: are offline" is a claim that has to be enforced rather than intended: the
+#: suite silently downloaded the clinical spreadsheet on every run for weeks,
+#: which cost nothing but made CI depend on S3 being up.
+OFFLINE_ENV = "ONSET_HFO_OFFLINE"
+
+
+def offline() -> bool:
+    """True when outbound requests are disabled for this process."""
+    return os.environ.get(OFFLINE_ENV, "").strip().lower() not in ("", "0", "false", "no")
+
+
 def _http_get(url: str, byte_range: tuple[int, int] | None = None, timeout: float = 120.0) -> bytes:
-    """GET a URL, optionally a byte range. Raises ``RuntimeError`` on failure."""
+    """GET a URL, optionally a byte range. Raises ``RuntimeError`` on failure.
+
+    This is the only place in the package that reaches the network, which is
+    what makes :data:`OFFLINE_ENV` a guarantee rather than a convention.
+    """
+    if offline():
+        raise OfflineError(
+            f"{OFFLINE_ENV} is set, so this request was refused rather than sent: {url}")
     headers = {}
     if byte_range is not None:
         headers["Range"] = f"bytes={byte_range[0]}-{byte_range[1]}"

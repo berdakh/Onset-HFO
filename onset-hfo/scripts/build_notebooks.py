@@ -41,6 +41,9 @@ sys.path.insert(0, os.getcwd())
 print("working directory:", os.getcwd())'''
 
 
+SETUP_ML = SETUP.replace('"-q", "-e", "."', '"-q", "-e", ".[ml]"').replace(
+    'pip install -e ".[dev]"', 'pip install -e ".[dev,ml]"')
+
 _COUNTER = itertools.count(1)
 
 
@@ -598,6 +601,18 @@ for a in agent.ask_many(EXAMPLE_QUESTIONS):
 * Read `docs/AGENT.md` for the threat model — including why tool *results*
   are treated as data and never as instructions.
 """),
+    md("""
+---
+## Where this goes next
+
+This notebook's agent *reads* an analysis somebody already ran. The next one
+lets it **choose** the analysis -- re-running a detector at a stricter
+threshold to see whether a finding survives -- then adds a learned
+per-contact model with calibrated uncertainty that the planner can stop on,
+and a set of tests that try to make the whole thing confidently wrong.
+
+**[Notebook 4 -- orchestration and localization](04_orchestration_and_localization.ipynb)**
+"""),
 ]
 
 # =========================================================================
@@ -842,9 +857,419 @@ converts these numbers into a claim about patients.
 ]
 
 
+
+
+# =========================================================================
+# 4. The model drives the analysis, and a model learns from the cohort
+# =========================================================================
+
+NB4 = "04_orchestration_and_localization.ipynb"
+nb4 = [
+    md(f"""
+# Onset-HFO 4 — The agent drives the analysis, and a model learns from the cohort
+
+{badge(NB4)}
+
+Notebooks 1–3 cover a **fixed pipeline** and an agent that can *read* what it
+produced. This one covers the two halves added since: an agent that decides
+*what to measure*, and a learned per-contact model with calibrated
+uncertainty — plus the place where they meet.
+
+**Nothing here downloads a recording.** The orchestration runs on simulated
+data and the modelling runs on a cohort feature table committed to the
+repository (269 KB), so the whole notebook executes in a free Colab instance
+in a couple of minutes.
+
+| part | what it shows |
+|---|---|
+| A | the agent re-running a detector at a stricter threshold — and changing its mind |
+| B | every claim resolving to a run id, or being struck |
+| C | a learned model, and the gap between subject-specific and deployable |
+| D | calibration, and a conformal guarantee that does not survive a new patient |
+| E | the coupling: the model as a tool the planner stops on |
+| F | trying to break the whole thing |
+
+**Read the honest summary first.** The learned model barely beats the ripple
+rate it was built from. The interesting numbers here are gaps and failures,
+not scores.
+"""),
+    code(SETUP_ML),
+    md("""
+---
+## Part A — the agent chooses the analysis
+
+The original agent had eight read-only tools over a *saved* analysis. It could
+report that a channel had 54 ripples/min at a threshold somebody chose hours
+ago. It could not ask the question a reviewer asks next:
+
+> *Does that survive a stricter threshold?*
+
+Every tool below executes the real pipeline at parameters the planner picks at
+call time. Let's watch it happen.
+"""),
+    code("""
+from onset_hfo.synthetic import make_synthetic_recording
+from onset_agent.analysis import AnalysisSession, build_registry
+
+recording = make_synthetic_recording(seed=7, duration_s=30, verbose=False)
+session = AnalysisSession(recording)
+tools = build_registry(session)
+
+print("tools the planner may call:")
+for name in tools.names():
+    print("  -", name)
+"""),
+    md("""
+### The worked example: survey, then challenge
+
+A survey at the conventional 5 robust SD, then a re-test of the leader at 7.
+Note the timing: the survey pays for the band-pass, the re-test is nearly
+free, which is what makes re-planning practical rather than theoretical.
+"""),
+    code("""
+survey = tools.run("detect_hfo", {"detector": "rms", "threshold_sd": 5, "k": 4})
+leader = next(iter(survey.output["channels"]))
+print(f"[{survey.run_id}] survey at 5 SD  ({survey.runtime_s:.2f} s)")
+for ch, row in survey.output["channels"].items():
+    print(f"    {ch:10s} {row['rate_per_min']:6.1f}/min   CI {row['rate_ci']}")
+
+retest = tools.run("detect_hfo", {"channels": [leader], "threshold_sd": 7, "k": 4})
+after = retest.output["channels"][leader]["rate_per_min"]
+before = survey.output["channels"][leader]["rate_per_min"]
+print(f"\\n[{retest.run_id}] {leader} re-tested at 7 SD  ({retest.runtime_s:.2f} s)")
+print(f"    {before:.1f}/min  ->  {after:.1f}/min   (survives {after / before:.0%})")
+"""),
+    md("""
+### Does the extra control change the answer?
+
+Four rungs, the **same analyzers**, the same recording. Only who decides what
+runs changes:
+
+- **S0** a fixed sequence of calls, no model at all — the prior-work baseline
+- **S1** the model picks the analyses once, never sees the results
+- **S2** the model sees each result before choosing the next call
+- **S3** as S2, plus every claim must resolve to a run id
+
+A channel's score is its survey rate multiplied by how well that rate survived
+any stricter threshold, capped at 1 — scrutiny can lower confidence, never
+raise it. S0 and S1 never re-test, so they cannot produce a robustness below
+1. That is the mechanism by which orchestration can change the answer at all.
+"""),
+    code("""
+from onset_agent.planner import Rung, run_rung, ModelJudged
+
+for rung in [Rung.S0, Rung.S1, Rung.S2, Rung.S3]:
+    session.reset_memo()          # each rung pays for its own detections
+    result = run_rung(session, rung, stop_rule=ModelJudged(max_calls=12), max_steps=12)
+    top = [(r.channel, round(r.score, 1), round(r.robustness, 2)) for r in result.ranking[:3]]
+    print(f"{rung.value}: {result.cost['n_tool_calls']:2d} calls, "
+          f"{result.n_retested} channel(s) challenged")
+    print(f"     top-3 (channel, score, robustness): {top}")
+"""),
+    md("""
+Read the `robustness` column. The re-planning rungs demote a channel whose
+rate collapses under a stricter threshold; the fixed rungs cannot, because
+they never look again.
+
+**A caution the repository insists on.** On the real `sub-pt01` recording this
+same mechanism re-orders the top five and the re-ordering *means nothing* —
+those channels sit between 70 and 83 events/min with heavily overlapping
+intervals, so they are tied, not ranked. A mechanism that works is not the
+same as a mechanism that helped.
+"""),
+    md("""
+---
+## Part B — every number resolves to a run, or it is struck
+
+The evidence store is an append-only ledger of every tool call. A sentence
+stating a number is admissible only if some tool produced it.
+"""),
+    code("""
+from onset_agent.verifier import DeterministicVerifier
+
+session.reset_memo()
+result = run_rung(session, Rung.S3, stop_rule=ModelJudged(max_calls=10))
+store = result.store
+
+print(f"{len(store)} tool runs recorded\\n")
+print(store.digest(max_runs=3, per_run_chars=110))
+print("\\nwhere did 54.0 come from? ->", store.find_number(54.0))
+print("where did 99999 come from? ->", store.find_number(99999) or "nowhere: unsupported")
+"""),
+    code("""
+honest = result.report
+fabricated = honest + " Channel ZZ1-ZZ2 reached 4210.5 ripples/min [hfo_001]."
+
+check = DeterministicVerifier()(fabricated, store)
+print(f"claims checked: {check.n_claims}   struck: {check.n_struck}")
+for struck in check.struck:
+    print("  STRUCK:", struck["sentence"])
+    print("  reason:", struck["reason"])
+print("\\nprovenance coverage of what survived:", round(check.provenance_coverage, 3))
+"""),
+    md("""
+The research question is not whether verification removes hallucinations — it
+does, by construction. It is what verification **costs**, because a verifier
+also strikes true statements it cannot resolve. `compare_verifiers` runs both
+the arithmetic checker and a language-model checker and reports the
+off-diagonal cells: true statements the model removed, and fabrications it let
+through.
+"""),
+    md("""
+---
+## Part C — a learned per-contact model
+
+Everything above ranks channels by a threshold. Can a model trained on the
+cohort do better?
+
+The cohort: **22 subjects, 1466 channels, 301 labelled seizure-onset contacts**
+from the archive's own clinical spreadsheet. The table is committed, so this
+runs with no download.
+"""),
+    code("""
+import pandas as pd
+from onset_hfo.learn import SHIPPED_COHORT
+
+features = pd.read_csv(SHIPPED_COHORT / "features.csv.gz")
+print(f"{features['subject'].nunique()} subjects, {len(features)} channels, "
+      f"{int(features['is_soz'].sum())} labelled SOZ "
+      f"({features['is_soz'].mean():.1%} prevalence)")
+features.groupby("site").agg(subjects=("subject", "nunique"),
+                             channels=("channel", "size"), soz=("is_soz", "sum"))
+"""),
+    md("""
+### Three protocols, and the gap between them is the result
+
+| protocol | trains on | answers |
+|---|---|---|
+| **within-subject** | other contacts of the *same* patient | are the contacts separable at all? a **ceiling** |
+| **leave-one-patient-out** | every *other* patient | the deployable number |
+| **leave-one-site-out** | patients at the *other* hospitals | what survives a change of centre |
+
+Within-subject is an upper bound, **not a deployable model**: using it would
+require already knowing some of that patient's answer.
+
+Class imbalance is severe, so AUPRC against the prevalence baseline is the
+number to read — accuracy is meaningless and AUROC is optimistic.
+"""),
+    code("""
+from onset_hfo.models import evaluate, baseline_scores
+
+rows = [baseline_scores(features, col, "raw").summary()
+        for col in ["rms_rate_per_min", "ll_rate_per_min"]]
+for protocol in ["within_subject", "lopo", "loso"]:
+    rows.append(evaluate(features, "gradient_boosting", "raw", protocol).summary())
+
+table = pd.DataFrame(rows)[["protocol", "model", "prevalence", "auprc",
+                            "auprc_lift_over_prevalence", "auroc", "precision_at_5"]]
+table
+"""),
+    md("""
+**Read the gap, not the best row.**
+
+The learned model buys about one AUPRC point over simply ranking channels by
+line-length rate — thirteen features and a cross-validation harness for almost
+nothing. The within-subject ceiling is far above both: the features *are*
+separable inside a recording, and most of that does not survive the move to a
+new patient. Cross-site costs almost nothing on top of cross-patient, which
+puts the transfer problem at the patient level rather than the hospital level.
+
+### So how much does a clinician's handful of labels buy?
+
+The ceiling needs labels you do not have. But a reviewer looking at a new
+implantation can genuinely point at a few contacts. Below, the target patient
+contributes *k* labelled contacts chosen **before anything is predicted**, and
+the model is scored only on the contacts it was *not* given. At `k = 0` this
+is exactly leave-one-patient-out, so both ends of the curve are the same
+experiment.
+"""),
+    code("""
+from onset_hfo.models import label_budget_curve
+
+curve = label_budget_curve(features, budgets=(0, 2, 5, 10, 20), model="logistic",
+                           normalisation="raw", n_repeats=3)
+curve[["n_labels", "labelled_fraction", "auprc", "gap_closed", "precision_at_5"]]
+"""),
+    code("""
+import matplotlib.pyplot as plt
+
+fig, ax = plt.subplots(figsize=(6, 3.6))
+ax.plot(curve["n_labels"], curve["auprc"], "o-", color="#3b6ea5", lw=2)
+ax.axhline(curve["auprc"].iloc[0], ls="--", c="#999",
+           label=f"leave-one-patient-out ({curve['auprc'].iloc[0]:.3f})")
+ax.set_xlabel("contacts the clinician labels first")
+ax.set_ylabel("AUPRC")
+ax.set_title("What a handful of labels buys")
+ax.legend(frameon=False, fontsize=9)
+for spine in ("top", "right"):
+    ax.spines[spine].set_visible(False)
+fig.tight_layout()
+"""),
+    md("""
+Five contacts — under a tenth of a typical implantation — recovers a large
+part of what is lost moving to a new patient. `labelled_fraction` is in the
+table on purpose: *40 labels* sounds modest until it is 60% of the electrodes.
+"""),
+    md("""
+---
+## Part D — calibrated probabilities, and a guarantee that breaks
+
+A ranking is not enough to act on. "These contacts, ranked" invites the reader
+to draw their own line; "these six contacts, with 90% coverage" is a statement
+with a guarantee attached.
+
+Split conformal prediction gives that guarantee **without assuming the model
+is right** — it assumes only that calibration and test data are
+*exchangeable*. Patients are not.
+"""),
+    code("""
+from onset_hfo.uncertainty import conformal_coverage_report, expected_calibration_error
+
+lopo = evaluate(features, "gradient_boosting", "raw", "lopo")
+print("expected calibration error (uncalibrated):",
+      round(expected_calibration_error(lopo.scores, lopo.truth), 4))
+
+report = conformal_coverage_report(lopo, alpha=0.1, seed=0)
+for key in ["nominal_coverage", "empirical_coverage", "mean_set_size",
+            "frac_singleton", "frac_ambiguous", "n_calibration_patients",
+            "n_test_patients"]:
+    print(f"  {key:24s} {report[key]}")
+"""),
+    md("""
+**It undercovers, and that is the finding.** The guarantee does not fail
+loudly — it produces tight-looking sets that cover less often than advertised,
+because the calibration patients are not exchangeable with the test patients.
+
+The clinically meaningful object is one number per patient: how many contacts
+**cannot be ruled out**. It is brutal reading.
+"""),
+    code("""
+pd.DataFrame(report["candidate_sets"])[
+    ["subject", "n_contacts", "n_candidates", "candidate_fraction",
+     "n_true_soz", "n_soz_covered"]]
+"""),
+    md("""
+A patient whose candidate set is four contacts has an actionable result. A
+patient whose set is forty has not been localized, however confident any
+individual score looked — and one patient here has a set of zero, having ruled
+out every contact including all the true ones.
+"""),
+    md("""
+---
+## Part E — the coupling
+
+This is where the two halves meet, and it is deliberately unremarkable: the
+learned model is **a tool in the registry like any other**, returning JSON.
+The planner does not know how it works. What it consumes is the *width* of the
+candidate set — and it keeps gathering evidence while that set is too wide to
+act on.
+"""),
+    code("""
+from onset_hfo.models import fit_soz_model
+from onset_agent.planner import ConformalWidth
+
+model = fit_soz_model(features, model="logistic", normalisation="raw", alpha=0.1)
+print("model trained on", model.n_train_patients, "patients;",
+      "conformal quantile", round(model.conformal_quantile, 3))
+
+coupled = AnalysisSession(recording, soz_model=model)
+result = run_rung(coupled, Rung.S2, stop_rule=ConformalWidth(max_width=3, max_calls=12))
+print("\\nstopped because:", result.stop_reason)
+
+soz_runs = result.store.runs("estimate_soz_probability", ok_only=True)
+if soz_runs:
+    out = soz_runs[-1].output
+    print(f"candidate set: {out['candidate_set_size']}/{out['n_channels']} channels "
+          f"at {out['nominal_coverage']:.0%} coverage")
+"""),
+    md("""
+**Look at why it stopped.** The model was fitted on real ECoG from 22
+patients and we have just pointed it at a *simulation* — a different montage,
+a different sampling rate, a different everything. It finds neither label
+plausible for any channel, so the candidate set comes back **empty**.
+
+An empty set is not a narrow one. Writing this notebook is what surfaced the
+bug: the rule originally treated zero candidates as "narrow enough to act on"
+and stopped with a message that read like success. It now says what actually
+happened. The most obvious failure mode of a deployed model should not be its
+success condition.
+"""),
+    code("""
+# Without a model the tool refuses with something the planner can act on,
+# and everything else still runs. A missing model degrades the agent; it
+# does not break it.
+bare = build_registry(AnalysisSession(recording)).run("estimate_soz_probability", {})
+print("ok:", bare.ok)
+print(bare.error[:200])
+"""),
+    md("""
+---
+## Part F — trying to break it
+
+Everything above measures how well something works. These measure whether it
+can be made **confidently wrong**. Each test states its expectation before it
+runs: a test that can be passed by any outcome is not a test.
+"""),
+    code("""
+from onset_agent.falsify import run_falsification_suite
+from onset_hfo.cohort import soz_labels
+
+labels = soz_labels(recording.subject, recording=recording)
+for check in run_falsification_suite(recording, labels, repeats=2):
+    print(f"[{check.verdict}] {check.name}")
+    print(f"        {check.reading}")
+"""),
+    md("""
+One of these failed when it was first written. Given a simulation containing
+**no epileptic contacts at all**, the pipeline ranked a channel at 6/min and
+nothing in its output said the recording was empty. There was no null
+hypothesis — every ranking function sorts noise.
+
+The fix was not a threshold. A leader must be distinguishable from the
+*median* channel's confidence interval, built from quantities the pipeline
+already computed, so it tightens by itself as the window grows. Check that it
+discriminates — a null that always fires is worthless:
+"""),
+    code("""
+from onset_hfo.metrics import leader_separation
+from onset_hfo.pipeline import run_pipeline
+
+for label, rec in [("with implanted ripples", recording),
+                   ("with nothing in it",
+                    make_synthetic_recording(seed=3, duration_s=30, hot_leads=0,
+                                             verbose=False))]:
+    sep = leader_separation(run_pipeline(rec, verbose=False).rates["rms"])
+    print(f"{label:24s} leader {sep['leader_rate_per_min']:5.1f}/min  "
+          f"median {sep['median_rate_per_min']:4.1f}  "
+          f"tied {sep['n_tied_with_leader']}/{sep['n_channels']}  "
+          f"-> stands out: {sep['distinguishable']}")
+"""),
+    md("""
+---
+## What none of this establishes
+
+- **Every orchestration number above comes from a deterministic scripted
+  planner**, not a language model. It is the control, not the result. The
+  anonymised-names falsification test exists specifically to catch a model
+  reciting priors about electrode naming, and a script cannot fail it.
+- **This is ictal data.** The clinical HFO literature measures *interictal*
+  rate; every feature here comes from a 60-second window around a seizure.
+- **The model is not clinical.** Fitted on 22 recordings from three centres,
+  scored against a retrospective record, on patients whose outcome is already
+  known.
+- **Nothing here identifies a seizure onset zone.** The agent's guard still
+  refuses SOZ questions; localization is an offline metric computed by code,
+  never a claim the model is allowed to make.
+
+`docs/ORCHESTRATION.md` and `docs/LOCALIZATION.md` carry the full design and
+end with explicit "what is not done" sections.
+"""),
+]
+
+
 def main() -> None:
     NOTEBOOK_DIR.mkdir(parents=True, exist_ok=True)
-    for name, cells in [(NB1, nb1), (NB2, nb2), (NB3, nb3)]:
+    for name, cells in [(NB1, nb1), (NB2, nb2), (NB3, nb3), (NB4, nb4)]:
         path = write(name, cells)
         print(f"wrote {path} ({len(cells)} cells)")
 

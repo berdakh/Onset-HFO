@@ -169,6 +169,15 @@ Three, compared on accuracy and cost:
 | `ModelJudged()` | the model says the evidence is sufficient — exactly as trustworthy as the model's self-assessment, which is why it is measured rather than assumed. |
 | `TiedSetWidth(max_width)` | the set of channels statistically tied for the lead is small enough. |
 
+`ConformalWidth` treats an **empty** candidate set as a failure, not a narrow
+one. A model that finds neither label plausible for any channel is being
+applied outside the distribution it was calibrated on — a cohort model on a
+different montage or a simulation — and reporting that as "narrowed enough to
+act on" would make the most obvious failure mode into the success condition.
+Writing notebook 4 is what surfaced it: a model fitted on real ECoG, pointed
+at synthetic data, stopped the planner at zero candidates and looked like a
+success.
+
 `TiedSetWidth` is the seam for the calibrated-classifier half of the project.
 Replace its `width()` with the size of a conformal prediction set at `1 − α`
 and it becomes the uncertainty-driven stopping criterion, with everything
@@ -387,4 +396,21 @@ Not yet, and each is a self-contained next piece of work:
   wall-clock. Needs a GPU; the backends already exist.
 * **A real-model measurement of the ladder.** Every number quoted here comes
   from the deterministic scripted planner. That is the control, not the
-  result.
+  result. `scripts/run_model_ladder.py` produces the missing numbers on a
+  machine with a GPU or Ollama:
+
+  ```bash
+  ollama pull qwen2.5:7b-instruct && ollama serve &
+  python scripts/run_model_ladder.py --backend ollama --model qwen2.5:7b-instruct
+  # a five-minute smoke test first, to check the model can plan at all:
+  python scripts/run_model_ladder.py --backend ollama --model qwen2.5:7b-instruct --quick
+  ```
+
+  It re-runs the scripted planner on the same machine and recording as a
+  control rather than quoting these numbers, measures run-to-run stability
+  (trivially 1.0 for a script; the first thing a reviewer asks about for a
+  sampled model), runs the falsification suite under both, and writes a
+  `RESULTS.md` ready to paste into this file. The row to read first is
+  **anonymised channel names**: it renames `AD1` to `EA1` and checks the
+  ranking does not move. A script cannot fail it; a model that knows `AD` is
+  an amygdala depth electrode can.
