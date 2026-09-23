@@ -244,3 +244,24 @@ def test_validation_config_is_honoured(prepared):
     events = detect_line_length(prepared)
     validate_events(events, prepared, ValidationConfig(min_peak_prominence_db=99.0))
     assert not any(e.accepted for e in events), "an impossible threshold must reject everything"
+
+
+def test_the_offline_guard_actually_refuses(tmp_path):
+    """The suite claims to be offline; this is what makes that a guarantee.
+
+    If this test ever fails, the guard has stopped working and every other
+    test in the suite may be silently reaching the archive again.
+    """
+    from onset_hfo.datasets import OfflineError, _http_get, offline
+
+    assert offline(), "the session fixture should have enabled offline mode"
+    with pytest.raises(OfflineError, match="ONSET_HFO_OFFLINE"):
+        _http_get("https://s3.amazonaws.com/openneuro.org/ds003029/participants.tsv")
+
+
+def test_labels_fall_back_gracefully_when_the_archive_is_unreachable():
+    """soz_labels must degrade to what it has locally, not raise."""
+    from onset_hfo.cohort import soz_labels
+
+    labels = soz_labels("sub-pt01")
+    assert labels.source in ("none", "clinical_summary")

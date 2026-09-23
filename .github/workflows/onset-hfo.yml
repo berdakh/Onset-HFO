@@ -1,7 +1,10 @@
 # Lint and test the Onset-HFO prototype.
 #
-# Everything here runs offline: the test suite uses the synthetic recording and
-# a local mock model server, so CI never downloads data or model weights.
+# Everything here runs offline, and that is enforced rather than intended:
+# tests/conftest.py sets ONSET_HFO_OFFLINE for the whole session and the single
+# network choke point in onset_hfo.datasets refuses every outbound request. A
+# test that reaches for the archive fails loudly instead of making a green CI
+# depend on S3 being up.
 name: onset-hfo
 
 on:

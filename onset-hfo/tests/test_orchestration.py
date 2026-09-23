@@ -699,3 +699,64 @@ def test_a_recording_with_nothing_in_it_does_not_get_a_leader():
     result = falsify_no_pathology(duration_s=20)
     assert result.passed is True
     assert result.measure["leader_stands_out"] is False
+
+
+def test_an_empty_conformal_set_is_a_failure_not_a_narrow_one():
+    """A model that rules out every channel is out of distribution, not done.
+
+    Treating zero candidates as "narrow enough to act on" would make the most
+    obvious failure mode of a deployed model into its success condition.
+    """
+    from onset_agent.contract import ToolRun
+    from onset_agent.evidence import EvidenceStore
+    from onset_agent.planner import ConformalWidth
+
+    rule = ConformalWidth(max_width=3)
+    store = EvidenceStore()
+    store.append(ToolRun("soz_001", "estimate_soz_probability", {},
+                         {"candidate_set_size": 0, "n_channels": 71}))
+    stop, reason = rule.should_stop(store, False)
+    assert stop, "an empty set should end the run rather than loop"
+    assert "EMPTY" in reason and "outside the distribution" in reason
+    assert "act on" not in reason.split("not that")[0]
+
+
+def test_the_real_model_ladder_script_runs_end_to_end(tmp_path, monkeypatch):
+    """Exercise scripts/run_model_ladder.py with the scripted planner standing
+    in for a served model.
+
+    It cannot be run here with real weights, so this checks the thing that
+    would otherwise be discovered forty minutes into someone's GPU run: that
+    the script's argument handling, loop, stability pass, falsification pass
+    and markdown renderer all work.
+    """
+    import importlib.util
+    import sys
+    from pathlib import Path as _Path
+
+    from onset_agent.planner import ScriptedPlanner
+
+    script = _Path(__file__).resolve().parent.parent / "scripts" / "run_model_ladder.py"
+    spec = importlib.util.spec_from_file_location("run_model_ladder", script)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["run_model_ladder"] = module
+    spec.loader.exec_module(module)
+
+    # Stand in for a served model, and skip the reachability probe.
+    monkeypatch.setattr("onset_agent.backends.make_backend",
+                        lambda *a, **k: ScriptedPlanner())
+    monkeypatch.setattr(module, "_check_backend", lambda backend: None)
+
+    out = tmp_path / "ladder"
+    code = module.main(["--synthetic", "--duration", "20", "--quick",
+                        "--out", str(out)])
+    assert code == 0
+
+    payload = json.loads((out / "ladder.json").read_text())
+    assert payload["runs"], "no rung produced a result"
+    assert all("error" not in run for run in payload["runs"].values()), payload["runs"]
+
+    results = (out / "RESULTS.md").read_text()
+    assert "tool calls" in results and "scripted" in results
+    assert "—" not in results.split("| configuration |")[1].split("\n")[2], \
+        "the table's first data row should carry a real ranking"

@@ -1,8 +1,37 @@
-"""Shared fixtures. Everything here is offline: no download, no model, no GPU."""
+"""Shared fixtures. Everything here is offline: no download, no model, no GPU.
+
+"Offline" is enforced, not intended. :func:`_no_network` sets
+``ONSET_HFO_OFFLINE`` for the whole session, and the single choke point in
+``onset_hfo.datasets`` refuses every outbound request. Before that guard
+existed the suite quietly downloaded the clinical spreadsheet on every run --
+harmless in itself, but it made a green CI depend on S3 being reachable, and
+it made the workflow's "never downloads data" comment untrue.
+"""
 
 from __future__ import annotations
 
+import os
+
 import pytest
+
+from onset_hfo.datasets import OFFLINE_ENV
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _no_network():
+    """Refuse every outbound request for the whole test session.
+
+    Autouse and session-scoped on purpose: a future test that reaches for the
+    archive should fail loudly here rather than pass on a machine with
+    network and hang on one without.
+    """
+    previous = os.environ.get(OFFLINE_ENV)
+    os.environ[OFFLINE_ENV] = "1"
+    yield
+    if previous is None:
+        os.environ.pop(OFFLINE_ENV, None)
+    else:
+        os.environ[OFFLINE_ENV] = previous
 
 from onset_hfo.pipeline import run_pipeline
 from onset_hfo.preprocess import prepare
