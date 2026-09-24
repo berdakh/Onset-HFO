@@ -295,7 +295,7 @@ onset_agent/          the agent
   orchestrate.py      python -m onset_agent.orchestrate ...
 
 notebooks/            the three Colab notebooks (built by scripts/build_notebooks.py)
-tests/                58 offline tests (synthetic data + a mock model server)
+tests/                190 offline tests (synthetic data + a mock model server)
 docs/                 everything above
 ```
 
