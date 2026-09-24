@@ -632,3 +632,30 @@ def test_zero_labels_is_the_same_for_every_strategy(rich_cohort):
     scores = {s: evaluate_active_learning(rich_cohort, s, 0, n_repeats=1).metrics()["auprc"]
               for s in ACQUISITION}
     assert len(set(scores.values())) == 1, scores
+
+
+def test_the_evaluation_split_is_the_same_in_every_process():
+    """Python salts hash() on strings, so using it for the split made the
+    active-learning table irreproducible: fixed within one process, different
+    in the next. CI found it by failing one 3.12 job and passing another at
+    the same commit."""
+    import subprocess
+    import sys
+
+    from onset_hfo.models import _stable_seed
+
+    seeds = {_stable_seed("sub-00", 0, 0)}
+    for _ in range(2):
+        out = subprocess.run(
+            [sys.executable, "-c",
+             "from onset_hfo.models import _stable_seed; print(_stable_seed('sub-00',0,0))"],
+            capture_output=True, text=True, check=True)
+        seeds.add(int(out.stdout.strip()))
+    assert len(seeds) == 1, f"the split seed differs between processes: {seeds}"
+
+
+def test_the_active_learning_result_is_reproducible(rich_cohort):
+    """Same inputs, same numbers -- twice."""
+    first = evaluate_active_learning(rich_cohort, "confident", 5, n_repeats=1, seed=0)
+    second = evaluate_active_learning(rich_cohort, "confident", 5, n_repeats=1, seed=0)
+    assert np.allclose(first.scores, second.scores, equal_nan=True)

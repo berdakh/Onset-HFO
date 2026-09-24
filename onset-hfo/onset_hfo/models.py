@@ -718,6 +718,22 @@ ACQUISITION = {
 }
 
 
+def _stable_seed(*parts) -> int:
+    """A seed that is the same in every process, unlike ``hash()``.
+
+    ``hash()`` on a string is salted per interpreter (PEP 456), so
+    ``hash((subject, repeat, seed))`` produces a different split on every run.
+    Using it to choose the evaluation pool made the active-learning comparison
+    irreproducible across processes -- and it failed CI on one Python 3.12 job
+    while passing on another at the same commit, which is exactly how this was
+    found. Anything that has to be identical between runs is hashed here.
+    """
+    import hashlib
+
+    payload = "|".join(str(part) for part in parts).encode()
+    return int.from_bytes(hashlib.blake2b(payload, digest_size=8).digest(), "big")
+
+
 def _acquire(strategy: str, pool: np.ndarray, probabilities: np.ndarray,
              rates: np.ndarray, truth: np.ndarray, n_labels: int, rng) -> np.ndarray:
     """Choose which contacts of the target patient get labelled."""
@@ -762,6 +778,11 @@ def evaluate_active_learning(features: pd.DataFrame, strategy: str = "random",
     comparison mean anything, and ``test_every_strategy_is_scored_on_the_same
     _contacts`` pins it.
 
+    The split seed goes through :func:`_stable_seed` rather than ``hash()``,
+    which is salted per interpreter: with ``hash()`` the pool was fixed within
+    a process and different in the next one, so the table in
+    ``docs/LOCALIZATION.md`` could not be reproduced by re-running it.
+
     The cohort model that ranks the candidates is trained **without** the
     target patient, so choosing what to label never sees that patient's
     answers.
@@ -798,8 +819,9 @@ def evaluate_active_learning(features: pd.DataFrame, strategy: str = "random",
                 cohort_cache[target] = (estimator, imputer)
             estimator, imputer = cohort_cache[target]
 
-            # One split per (patient, repeat), identical for every strategy.
-            split_rng = np.random.default_rng(hash((target, repeat, seed)) % (2**32))
+            # One split per (patient, repeat), identical for every strategy AND
+            # for every process -- see _stable_seed.
+            split_rng = np.random.default_rng(_stable_seed(target, repeat, seed))
             shuffled = split_rng.permutation(len(rows))
             n_eval = max(2, int(round(eval_fraction * len(rows))))
             eval_local = np.sort(shuffled[:n_eval])
@@ -842,27 +864,60 @@ def evaluate_active_learning(features: pd.DataFrame, strategy: str = "random",
 def active_learning_comparison(features: pd.DataFrame, budgets=(2, 5, 10),
                                strategies=tuple(ACQUISITION), model: str = "logistic",
                                normalisation: str = "raw", n_repeats: int = 3,
-                               seed: int = 0) -> pd.DataFrame:
-    """Score every (strategy, budget) on the same held-out contacts.
+                               seeds=(0, 1, 2, 3, 4)) -> pd.DataFrame:
+    """Score every (strategy, budget) on the same held-out contacts, over several seeds.
 
     ``lift_over_random`` is the column the experiment exists for: whether
     choosing *which* contacts to label beats asking for any five. A strategy
     that does not beat random is not worth the workflow it would require.
+
+    **Several seeds, not one.** With 22 patients and half of each
+    implantation held out, a single seed's evaluation split moves the lift by
+    more than the difference between strategies. The first version of this
+    reported one seed and showed random *winning* at ten labels -- which was
+    noise, and the opposite of what four of the five other seeds say. What is
+    returned is therefore the mean and spread across seeds, and
+    ``n_seeds_beating_random`` out of ``n_seeds``: a strategy that wins on
+    three seeds out of five has not been shown to win.
     """
-    rows = []
-    for budget in budgets:
-        for strategy in strategies:
-            result = evaluate_active_learning(features, strategy=strategy,
-                                              n_labels=int(budget), model=model,
-                                              normalisation=normalisation,
-                                              n_repeats=n_repeats, seed=seed)
-            summary = result.summary()
-            summary["strategy"] = strategy
-            summary["n_labels"] = int(budget)
-            rows.append(summary)
-    table = pd.DataFrame(rows)
-    baseline = table[table["strategy"] == "random"].set_index("n_labels")["auprc"]
-    table["lift_over_random"] = [
-        round(row["auprc"] - baseline.get(row["n_labels"], float("nan")), 4)
-        if row["auprc"] is not None else None for _, row in table.iterrows()]
-    return table.sort_values(["n_labels", "auprc"], ascending=[True, False])
+    seeds = (seeds,) if isinstance(seeds, int) else tuple(seeds)
+    frames = []
+    for seed in seeds:
+        rows = []
+        for budget in budgets:
+            for strategy in strategies:
+                result = evaluate_active_learning(features, strategy=strategy,
+                                                  n_labels=int(budget), model=model,
+                                                  normalisation=normalisation,
+                                                  n_repeats=n_repeats, seed=seed)
+                summary = result.summary()
+                summary["strategy"] = strategy
+                summary["n_labels"] = int(budget)
+                summary["seed"] = seed
+                rows.append(summary)
+        per_seed = pd.DataFrame(rows)
+        baseline = per_seed[per_seed["strategy"] == "random"].set_index("n_labels")["auprc"]
+        per_seed["lift_over_random"] = [
+            row["auprc"] - baseline.get(row["n_labels"], float("nan"))
+            if row["auprc"] is not None else float("nan")
+            for _, row in per_seed.iterrows()]
+        frames.append(per_seed)
+
+    everything = pd.concat(frames, ignore_index=True)
+    grouped = everything.groupby(["n_labels", "strategy"], as_index=False).agg(
+        auprc=("auprc", "mean"), auprc_sd=("auprc", "std"),
+        lift_over_random=("lift_over_random", "mean"),
+        lift_sd=("lift_over_random", "std"),
+        auroc=("auroc", "mean"), precision_at_5=("precision_at_5", "mean"),
+        n_patients=("n_patients", "max"))
+    beats = everything[everything["strategy"] != "random"].assign(
+        win=lambda d: d["lift_over_random"] > 0).groupby(
+        ["n_labels", "strategy"], as_index=False)["win"].sum()
+    grouped = grouped.merge(beats.rename(columns={"win": "n_seeds_beating_random"}),
+                            on=["n_labels", "strategy"], how="left")
+    grouped["n_seeds"] = len(seeds)
+    for column in ("auprc", "auprc_sd", "lift_over_random", "lift_sd", "auroc",
+                   "precision_at_5"):
+        grouped[column] = grouped[column].round(4)
+    return grouped.sort_values(["n_labels", "lift_over_random"],
+                               ascending=[True, False]).reset_index(drop=True)

@@ -184,9 +184,10 @@ def _cmd_acquire(args) -> int:
 
     features = _load_features(args.cohort)
     budgets = tuple(int(b) for b in args.budgets.split(","))
+    seeds = tuple(int(s) for s in str(args.seeds).split(","))
     table = active_learning_comparison(features, budgets=budgets, model=args.model,
                                        normalisation=args.normalisation,
-                                       n_repeats=args.repeats, seed=args.seed)
+                                       n_repeats=args.repeats, seeds=seeds)
     print("strategies:")
     for name, description in ACQUISITION.items():
         print(f"  {name:12s} {description}")
@@ -195,8 +196,9 @@ def _cmd_acquire(args) -> int:
     print("the seed alone and never from the strategy. Without that the comparison")
     print("would be four different exams.\n")
 
-    columns = [c for c in ["n_labels", "strategy", "auprc", "lift_over_random", "auroc",
-                           "precision_at_5", "n_patients"] if c in table.columns]
+    columns = [c for c in ["n_labels", "strategy", "auprc", "lift_over_random", "lift_sd",
+                           "n_seeds_beating_random", "n_seeds", "auroc", "precision_at_5"]
+               if c in table.columns]
     pd.set_option("display.width", 200)
     print(table[columns].to_string(index=False))
 
@@ -204,8 +206,9 @@ def _cmd_acquire(args) -> int:
     out.parent.mkdir(parents=True, exist_ok=True)
     table.to_csv(out, index=False)
     print(f"\n[learn] written to {out}")
-    print("[learn] lift_over_random is the column this exists for. A strategy that does "
-          "not beat a random draw is not worth the workflow it would require.")
+    print("\n[learn] lift_over_random is the column this exists for, and "
+          "n_seeds_beating_random is how much to trust it: a strategy that wins on three "
+          "seeds out of five has not been shown to win.")
     return 0
 
 
@@ -265,6 +268,10 @@ def main(argv: list[str] | None = None) -> int:
         if name == "acquire":
             p.add_argument("--budgets", default="2,5,10",
                            help="comma-separated label budgets")
+            p.add_argument("--seeds", default="0,1,2,3,4",
+                           help="comma-separated seeds; one seed is not a result, because "
+                                "the evaluation split moves the lift by more than the "
+                                "difference between strategies")
             p.add_argument("--repeats", type=int, default=3,
                            help="repeats; only the random strategy is stochastic, but the "
                                 "evaluation split varies with the seed")

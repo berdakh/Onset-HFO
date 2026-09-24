@@ -72,7 +72,7 @@ python -m onset_hfo.learn uncertainty        # calibration, conformal coverage
 # 7. measure the detectors against known truth
 python -m onset_hfo.cli evaluate --seeds 1 7 42
 
-pytest -q        # 188 tests, all offline, ~41 seconds
+pytest -q        # 190 tests, all offline, ~44 seconds
 ```
 
 ## What it actually does
@@ -177,11 +177,13 @@ clinician label a few contacts first, then predict the rest.
 
 Five contacts — under a tenth of the electrodes — recovers well over a third
 of what is lost moving to a new patient. And it matters *which* five
-(`python -m onset_hfo.learn acquire`): choosing by the model's own ranking
-beats a random draw by about as much again, while **uncertainty sampling — the
-textbook active-learning strategy — loses to random at every budget**. With
-five labels and 20% prevalence what you are short of is positives, and the
-contacts a model is unsure about are mostly ambiguous negatives.
+(`python -m onset_hfo.learn acquire`): choosing beats a random draw on all
+five seeds at two and five labels, most at the tightest budget (+0.062 AUPRC
+at two labels, half that by ten). **Uncertainty sampling — the textbook
+active-learning strategy — loses to random.** With five labels and 20%
+prevalence what you are short of is positives, and the contacts a model is
+unsure about are mostly ambiguous negatives. The strategy that needs no model
+at all — label the highest ripple rates — is the best of them.
 
 ### Trying to break it
 

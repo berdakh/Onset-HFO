@@ -1,13 +1,13 @@
-model,normalisation,protocol,n,n_patients,prevalence,auprc,auroc,auprc_lift_over_prevalence,precision_at_1,n_patients_at_1,precision_at_3,n_patients_at_3,precision_at_5,n_patients_at_5,note,auprc_per_patient_median,auprc_per_patient_iqr,n_patients_scored,strategy,n_labels,lift_over_random
-logistic+2@confident,raw,active_confident_2,1276,22,0.1998,0.5015,0.7546,2.509,0.4091,22,0.5455,22,0.5182,22,2 label(s) chosen by 'confident' (the contacts the cohort model ranks highest: what a clinician handed a ranking would look at first); scored on a fixed held-out pool identical across strategies,0.5848,"[0.3625, 0.6966]",22,confident,2,0.0357
-logistic+2@rate,raw,active_rate_2,1276,22,0.1998,0.4879,0.7479,2.441,0.5455,22,0.5455,22,0.5545,22,"2 label(s) chosen by 'rate' (the contacts with the highest ripple rate -- available today, needs no model); scored on a fixed held-out pool identical across strategies",0.6043,"[0.3691, 0.702]",22,rate,2,0.0221
-logistic+2@random,raw,active_random_2,1276,22,0.1998,0.4658,0.754,2.331,0.5455,22,0.5909,22,0.5909,22,2 label(s) chosen by 'random' (a stratified random draw: what the label-budget curve assumes); scored on a fixed held-out pool identical across strategies,0.6107,"[0.3418, 0.7562]",22,random,2,0.0
-logistic+2@uncertainty,raw,active_uncertainty_2,1276,22,0.1998,0.4514,0.7515,2.259,0.5455,22,0.5909,22,0.5364,22,2 label(s) chosen by 'uncertainty' (the contacts the cohort model is least sure about (p nearest 0.5) -- textbook active learning); scored on a fixed held-out pool identical across strategies,0.6088,"[0.3518, 0.7336]",22,uncertainty,2,-0.0144
-logistic+5@confident,raw,active_confident_5,1276,22,0.1998,0.5539,0.7648,2.772,0.5455,22,0.5758,22,0.5727,22,5 label(s) chosen by 'confident' (the contacts the cohort model ranks highest: what a clinician handed a ranking would look at first); scored on a fixed held-out pool identical across strategies,0.5958,"[0.3639, 0.7658]",22,confident,5,0.0625
-logistic+5@rate,raw,active_rate_5,1276,22,0.1998,0.5328,0.763,2.666,0.5,22,0.5303,22,0.5727,22,"5 label(s) chosen by 'rate' (the contacts with the highest ripple rate -- available today, needs no model); scored on a fixed held-out pool identical across strategies",0.6322,"[0.3356, 0.7073]",22,rate,5,0.0414
-logistic+5@random,raw,active_random_5,1276,22,0.1998,0.4914,0.7611,2.459,0.4545,22,0.5455,22,0.5364,22,5 label(s) chosen by 'random' (a stratified random draw: what the label-budget curve assumes); scored on a fixed held-out pool identical across strategies,0.5347,"[0.354, 0.7368]",22,random,5,0.0
-logistic+5@uncertainty,raw,active_uncertainty_5,1276,22,0.1998,0.48,0.7653,2.402,0.4091,22,0.5758,22,0.5636,22,5 label(s) chosen by 'uncertainty' (the contacts the cohort model is least sure about (p nearest 0.5) -- textbook active learning); scored on a fixed held-out pool identical across strategies,0.5698,"[0.3493, 0.713]",22,uncertainty,5,-0.0114
-logistic+10@confident,raw,active_confident_10,1276,22,0.1998,0.57,0.7802,2.852,0.5455,22,0.5909,22,0.5545,22,10 label(s) chosen by 'confident' (the contacts the cohort model ranks highest: what a clinician handed a ranking would look at first); scored on a fixed held-out pool identical across strategies,0.5902,"[0.3231, 0.8247]",22,confident,10,0.0456
-logistic+10@rate,raw,active_rate_10,1276,22,0.1998,0.5643,0.7889,2.824,0.5909,22,0.5455,22,0.5273,22,"10 label(s) chosen by 'rate' (the contacts with the highest ripple rate -- available today, needs no model); scored on a fixed held-out pool identical across strategies",0.6045,"[0.3315, 0.7382]",22,rate,10,0.0399
-logistic+10@random,raw,active_random_10,1276,22,0.1998,0.5244,0.7787,2.624,0.5909,22,0.5303,22,0.5818,22,10 label(s) chosen by 'random' (a stratified random draw: what the label-budget curve assumes); scored on a fixed held-out pool identical across strategies,0.5792,"[0.3144, 0.7207]",22,random,10,0.0
-logistic+10@uncertainty,raw,active_uncertainty_10,1276,22,0.1998,0.4936,0.777,2.47,0.4545,22,0.5758,22,0.5455,22,10 label(s) chosen by 'uncertainty' (the contacts the cohort model is least sure about (p nearest 0.5) -- textbook active learning); scored on a fixed held-out pool identical across strategies,0.5571,"[0.3215, 0.7442]",22,uncertainty,10,-0.0308
+n_labels,strategy,auprc,auprc_sd,lift_over_random,lift_sd,auroc,precision_at_5,n_patients,n_seeds_beating_random,n_seeds
+2,confident,0.5437,0.0072,0.0615,0.0083,0.7652,0.6218,22,5.0,5
+2,rate,0.5213,0.0143,0.0391,0.0101,0.7607,0.5927,22,5.0,5
+2,uncertainty,0.4906,0.0133,0.0084,0.0104,0.7619,0.5873,22,4.0,5
+2,random,0.4822,0.0093,0.0,0.0,0.7614,0.5909,22,,5
+5,rate,0.5718,0.0136,0.0469,0.0158,0.7819,0.6036,22,5.0,5
+5,confident,0.5689,0.0114,0.044,0.0092,0.7751,0.6036,22,5.0,5
+5,random,0.5249,0.011,0.0,0.0,0.774,0.6055,22,,5
+5,uncertainty,0.508,0.0149,-0.0169,0.0186,0.7783,0.5982,22,0.0,5
+10,rate,0.5915,0.008,0.0311,0.0207,0.8019,0.6127,22,4.0,5
+10,confident,0.5886,0.0104,0.0282,0.0183,0.7986,0.6127,22,4.0,5
+10,random,0.5604,0.0168,0.0,0.0,0.7994,0.6255,22,,5
+10,uncertainty,0.5304,0.0199,-0.03,0.0299,0.7945,0.6055,22,1.0,5

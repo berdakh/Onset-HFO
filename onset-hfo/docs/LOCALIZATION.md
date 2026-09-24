@@ -214,28 +214,43 @@ patient's answers.
 
 ### Result
 
-| labels | strategy | AUPRC | lift over random |
-|---|---|---|---|
-| 2 | **confident** | 0.502 | **+0.036** |
-| 2 | rate | 0.488 | +0.022 |
-| 2 | random | 0.466 | -- |
-| 2 | uncertainty | 0.451 | -0.014 |
-| 5 | **confident** | 0.554 | **+0.063** |
-| 5 | rate | 0.533 | +0.041 |
-| 5 | random | 0.491 | -- |
-| 5 | uncertainty | 0.480 | -0.011 |
-| 10 | **confident** | 0.570 | **+0.046** |
-| 10 | rate | 0.564 | +0.040 |
-| 10 | random | 0.524 | -- |
-| 10 | uncertainty | 0.494 | -0.031 |
+Five seeds, because one is not a result: with 22 patients and half of each
+implantation held out, a single evaluation split moves the lift by more than
+the difference between strategies. Mean lift over a random draw, and how many
+of the five seeds it beat random on:
 
-**Yes, it matters.** Choosing beats random at every budget, and the gain is
-comparable to doubling the budget -- five well-chosen labels are worth about
-ten random ones.
+| labels | strategy | AUPRC | lift over random | sd | seeds won |
+|---|---|---|---|---|---|
+| 2 | **confident** | 0.544 | **+0.062** | 0.008 | **5/5** |
+| 2 | rate | 0.521 | +0.039 | 0.010 | **5/5** |
+| 2 | uncertainty | 0.491 | +0.008 | 0.010 | 4/5 |
+| 2 | random | 0.482 | — | — | — |
+| 5 | **rate** | 0.572 | **+0.047** | 0.016 | **5/5** |
+| 5 | confident | 0.569 | +0.044 | 0.009 | **5/5** |
+| 5 | random | 0.525 | — | — | — |
+| 5 | uncertainty | 0.508 | −0.017 | 0.019 | 0/5 |
+| 10 | rate | 0.592 | +0.031 | 0.021 | 4/5 |
+| 10 | confident | 0.589 | +0.028 | 0.018 | 4/5 |
+| 10 | random | 0.560 | — | — | — |
+| 10 | uncertainty | 0.530 | −0.030 | 0.030 | 1/5 |
+
+**Yes, it matters — and most where the budget is tightest.** Choosing wins on
+all five seeds at two and five labels. The advantage is largest at two
+(+0.062) and roughly halves by ten (+0.031, and only 4/5 seeds), which is the
+useful direction: the fewer contacts you can ask a clinician for, the more it
+matters which ones you ask about.
+
+> An earlier version of this table reported a **single seed** and showed
+> random winning at ten labels. That was noise — four of the five other seeds
+> say the opposite. It was caught because the split seed went through
+> Python's `hash()`, which is salted per process, so CI failed one 3.12 job
+> and passed another at the same commit. Both the irreproducibility and the
+> single-seed claim are fixed; `_stable_seed` and two tests pin them.
 
 **Textbook active learning is the worst strategy here.** `uncertainty` loses
-to a random draw at all three budgets. The mechanism is visible in what each
-strategy actually picks, against a cohort prevalence of 20.5%:
+to a random draw on 5/5 seeds at five labels and 4/5 at ten. The mechanism is
+visible in what each strategy actually picks, against a cohort prevalence of
+20.5%:
 
 | strategy | fraction of the 5 chosen contacts that are really SOZ |
 |---|---|
@@ -250,9 +265,9 @@ are short of is **positives**, and the contacts the model is unsure about are
 mostly ambiguous negatives. Uncertainty sampling spends a scarce budget on
 them.
 
-**`rate` needs no model at all** and comes within a point or two of the best
-strategy. "Label the five channels with the highest ripple rate" is a workflow
-that exists today, and it captures most of the available gain.
+**`rate` needs no model at all** and is the best strategy at five and ten
+labels. "Label the five channels with the highest ripple rate" is a workflow
+that exists today, and it captures the whole of the available gain.
 
 ### The caveat that decides whether this transfers
 
