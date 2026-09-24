@@ -251,7 +251,7 @@ unmeasured, and is the first experiment to run.
 
 ## 7. Test suite
 
-`pytest -q` — 116 tests, entirely offline, about fourteen seconds. They cover the
+`pytest -q` — 190 tests, entirely offline, about forty seconds. They cover the
 primitives (robust scale, sliding features, threshold segmentation, bipolar
 pairing), the detectors (hot channels found, events are oscillations, a flat
 channel yields nothing, thresholds behave monotonically, reruns are
@@ -262,7 +262,7 @@ number verification, and the language-model path against a mock
 OpenAI-compatible server that replies the way Qwen and Llama servers do —
 including the two ways small models get it wrong).
 
-`tests/test_orchestration.py` adds 58 of those, covering the orchestration
+`tests/test_orchestration.py` adds 70 of those and `tests/test_localization.py` 60, covering the orchestration
 half: the label layer (including the `S`/`F` outcome inversion and the
 subject-id mismatch), the tool contract's validation and clamping, the
 evidence store's number resolution, the live tools (a stricter threshold finds

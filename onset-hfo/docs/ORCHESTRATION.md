@@ -373,7 +373,7 @@ verification), and a combined `ladder.json`.
 
 ## 8. What is measured today, and what is not
 
-Implemented and tested (47 offline tests in `tests/test_orchestration.py`):
+Implemented and tested (70 offline tests in `tests/test_orchestration.py`):
 
 * the frozen contract, the evidence store, and the nine live tools;
 * all four rungs, three stopping rules, and run-to-run stability over repeats;
