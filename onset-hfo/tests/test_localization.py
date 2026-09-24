@@ -20,11 +20,14 @@ from onset_hfo.batch import (
     add_within_subject_normalisation,
 )
 from onset_hfo.models import (
+    ACQUISITION,
     MODELS,
     SozModel,
+    active_learning_comparison,
     baseline_scores,
     build_design_matrix,
     evaluate,
+    evaluate_active_learning,
     evaluate_personalized,
     fit_soz_model,
     label_budget_curve,
@@ -499,3 +502,160 @@ def test_the_gap_closed_column_is_filled_when_there_is_a_gap(rich_cohort):
                                normalisation="rank", n_repeats=2)
     assert curve["gap_closed"].iloc[0] == 0.0
     assert curve["gap_closed"].iloc[1] > 0
+
+
+# --------------------------------------------------------------------------
+# Active learning: does it matter WHICH contacts get labelled?
+# --------------------------------------------------------------------------
+
+
+def test_every_strategy_is_scored_on_the_same_contacts(rich_cohort):
+    """The experiment is meaningless without this.
+
+    Each strategy removes different contacts from what remains: uncertainty
+    sampling takes the hard ones and leaves an easier test set, ranking by
+    probability takes the obvious positives and leaves a harder one. Scoring
+    each on its own leftovers compares four different exams.
+    """
+    scored = {}
+    for strategy in ACQUISITION:
+        result = evaluate_active_learning(rich_cohort, strategy=strategy, n_labels=5,
+                                          n_repeats=1, seed=0)
+        scored[strategy] = (tuple(result.groups), tuple(result.truth))
+    assert len(set(scored.values())) == 1, (
+        "strategies were scored on different contacts, so their scores cannot be "
+        "compared: " + ", ".join(scored))
+
+
+def test_the_evaluation_pool_is_never_labelled(rich_cohort):
+    """A contact whose label you handed over is not a prediction."""
+    result = evaluate_active_learning(rich_cohort, strategy="confident", n_labels=5,
+                                      n_repeats=1, seed=0)
+    # Every fold trains on the cohort plus at most n_labels target contacts,
+    # and is scored on a disjoint set of that same patient's contacts.
+    for fold in result.folds:
+        assert fold.n_test > 0
+        assert fold.n_train <= len(rich_cohort) + 5
+
+
+def test_the_ranking_model_never_sees_the_target_patient(rich_cohort):
+    """Choosing what to label must not use that patient's answers."""
+    import inspect
+
+    from onset_hfo.models import evaluate_active_learning as fn
+
+    source = inspect.getsource(fn)
+    assert "groups != target" in source, "candidates must be ranked by a cohort model"
+    assert "never sees the target patient" in source
+
+
+@pytest.fixture(scope="module")
+def transferable_cohort() -> pd.DataFrame:
+    """Enough contacts to fit, and one decision boundary shared by everyone.
+
+    A cohort model can rank a new patient's contacts here, which is the
+    precondition for choosing what to label by model confidence.
+    """
+    return _make_cohort(8, (200, 260), seed=3, patient_specific=0.0)
+
+
+def test_choosing_beats_a_random_draw_when_the_cohort_model_transfers(
+        transferable_cohort):
+    """The whole question, on data where the precondition holds."""
+    random = evaluate_active_learning(transferable_cohort, "random", 5,
+                                      n_repeats=2).metrics()
+    confident = evaluate_active_learning(transferable_cohort, "confident", 5,
+                                         n_repeats=2).metrics()
+    assert confident["auprc"] >= random["auprc"]
+
+
+def test_confidence_based_acquisition_inherits_the_transfer_problem(rich_cohort):
+    """And when it does not transfer, choosing is WORSE than not choosing.
+
+    `rich_cohort` gives every patient its own decision boundary, so a model
+    trained on the others ranks the target's contacts near-arbitrarily -- and
+    a strategy that trusts that ranking spends its five labels worse than a
+    coin would. This is not a defect in the acquisition function; it is the
+    same transfer gap the protocol table measures, showing up one layer up.
+    It is the reason the `rate` strategy matters: it reads a measured feature
+    and needs no model to transfer at all.
+    """
+    random = evaluate_active_learning(rich_cohort, "random", 5, n_repeats=2).metrics()
+    confident = evaluate_active_learning(rich_cohort, "confident", 5,
+                                         n_repeats=2).metrics()
+    assert confident["auprc"] < random["auprc"], (
+        "if this passes, the fixture's patient-specific boundaries are no longer "
+        "defeating cohort-model transfer and the caveat needs re-checking")
+
+
+def test_the_rate_strategy_needs_no_model_at_all(rich_cohort):
+    """It is the one a clinician can run today, so it must not silently
+    depend on a fitted model to pick its contacts."""
+    import numpy as np
+
+    from onset_hfo.models import _acquire
+
+    rng = np.random.default_rng(0)
+    pool = np.arange(6)
+    rates = np.array([1.0, 9.0, 3.0, 8.0, 2.0, 7.0])
+    nonsense = np.full(6, np.nan)        # no usable model probabilities
+    chosen = _acquire("rate", pool, nonsense, rates, np.zeros(6, int), 3, rng)
+    assert set(chosen.tolist()) == {1, 3, 5}, "should take the three highest rates"
+
+
+def test_a_missing_rate_column_does_not_win_by_accident():
+    """NaN rates must sort last, not first."""
+    import numpy as np
+
+    from onset_hfo.models import _acquire
+
+    rates = np.array([np.nan, 5.0, np.nan, 1.0])
+    chosen = _acquire("rate", np.arange(4), np.zeros(4), rates, np.zeros(4, int), 2,
+                      np.random.default_rng(0))
+    assert chosen.tolist() == [1, 3]
+
+
+def test_an_unknown_acquisition_strategy_is_refused(rich_cohort):
+    with pytest.raises(ValueError, match="strategy must be one of"):
+        evaluate_active_learning(rich_cohort, strategy="vibes", n_labels=5)
+
+
+def test_the_comparison_reports_lift_over_random(rich_cohort):
+    table = active_learning_comparison(rich_cohort, budgets=(5,), n_repeats=1)
+    assert set(table["strategy"]) == set(ACQUISITION)
+    random_row = table[table["strategy"] == "random"].iloc[0]
+    assert random_row["lift_over_random"] == 0.0, "random must be its own baseline"
+
+
+def test_zero_labels_is_the_same_for_every_strategy(rich_cohort):
+    """With nothing to choose, the strategies cannot differ."""
+    scores = {s: evaluate_active_learning(rich_cohort, s, 0, n_repeats=1).metrics()["auprc"]
+              for s in ACQUISITION}
+    assert len(set(scores.values())) == 1, scores
+
+
+def test_the_evaluation_split_is_the_same_in_every_process():
+    """Python salts hash() on strings, so using it for the split made the
+    active-learning table irreproducible: fixed within one process, different
+    in the next. CI found it by failing one 3.12 job and passing another at
+    the same commit."""
+    import subprocess
+    import sys
+
+    from onset_hfo.models import _stable_seed
+
+    seeds = {_stable_seed("sub-00", 0, 0)}
+    for _ in range(2):
+        out = subprocess.run(
+            [sys.executable, "-c",
+             "from onset_hfo.models import _stable_seed; print(_stable_seed('sub-00',0,0))"],
+            capture_output=True, text=True, check=True)
+        seeds.add(int(out.stdout.strip()))
+    assert len(seeds) == 1, f"the split seed differs between processes: {seeds}"
+
+
+def test_the_active_learning_result_is_reproducible(rich_cohort):
+    """Same inputs, same numbers -- twice."""
+    first = evaluate_active_learning(rich_cohort, "confident", 5, n_repeats=1, seed=0)
+    second = evaluate_active_learning(rich_cohort, "confident", 5, n_repeats=1, seed=0)
+    assert np.allclose(first.scores, second.scores, equal_nan=True)

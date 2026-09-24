@@ -181,6 +181,107 @@ feature value.
 
 ---
 
+## 2c. Does it matter *which* contacts get labelled?
+
+Section 2b assumes the clinician labels a **random** five. They would not --
+they would look at the suspicious ones. So: pick the five by a strategy, and
+see whether choosing beats not choosing.
+
+```bash
+python -m onset_hfo.learn acquire
+```
+
+| strategy | how the contacts are chosen | needs a model? |
+|---|---|---|
+| `random` | stratified random draw -- the control, and what 2b assumes | no |
+| `uncertainty` | cohort model least sure (p nearest 0.5) -- textbook active learning | yes |
+| `confident` | cohort model ranks highest -- what a clinician handed a ranking does | yes |
+| `rate` | highest ripple rate -- **available today, no model at all** | no |
+
+### The confound this is built around
+
+Each strategy removes *different* contacts from what remains. Uncertainty
+sampling takes the hard ones and leaves an easier test set; ranking by
+probability takes the obvious positives and leaves a harder one. Scoring each
+strategy on its own leftovers compares four different exams.
+
+So every patient's contacts are split once into a **fixed evaluation pool**
+and a labelling pool, from the repeat's seed alone and never from the
+strategy. All four choose from the same pool and are scored on the same
+held-out contacts. The cohort model that ranks the candidates is trained
+without the target patient, so choosing what to label never sees that
+patient's answers.
+
+### Result
+
+Five seeds, because one is not a result: with 22 patients and half of each
+implantation held out, a single evaluation split moves the lift by more than
+the difference between strategies. Mean lift over a random draw, and how many
+of the five seeds it beat random on:
+
+| labels | strategy | AUPRC | lift over random | sd | seeds won |
+|---|---|---|---|---|---|
+| 2 | **confident** | 0.544 | **+0.062** | 0.008 | **5/5** |
+| 2 | rate | 0.521 | +0.039 | 0.010 | **5/5** |
+| 2 | uncertainty | 0.491 | +0.008 | 0.010 | 4/5 |
+| 2 | random | 0.482 | — | — | — |
+| 5 | **rate** | 0.572 | **+0.047** | 0.016 | **5/5** |
+| 5 | confident | 0.569 | +0.044 | 0.009 | **5/5** |
+| 5 | random | 0.525 | — | — | — |
+| 5 | uncertainty | 0.508 | −0.017 | 0.019 | 0/5 |
+| 10 | rate | 0.592 | +0.031 | 0.021 | 4/5 |
+| 10 | confident | 0.589 | +0.028 | 0.018 | 4/5 |
+| 10 | random | 0.560 | — | — | — |
+| 10 | uncertainty | 0.530 | −0.030 | 0.030 | 1/5 |
+
+**Yes, it matters — and most where the budget is tightest.** Choosing wins on
+all five seeds at two and five labels. The advantage is largest at two
+(+0.062) and roughly halves by ten (+0.031, and only 4/5 seeds), which is the
+useful direction: the fewer contacts you can ask a clinician for, the more it
+matters which ones you ask about.
+
+> An earlier version of this table reported a **single seed** and showed
+> random winning at ten labels. That was noise — four of the five other seeds
+> say the opposite. It was caught because the split seed went through
+> Python's `hash()`, which is salted per process, so CI failed one 3.12 job
+> and passed another at the same commit. Both the irreproducibility and the
+> single-seed claim are fixed; `_stable_seed` and two tests pin them.
+
+**Textbook active learning is the worst strategy here.** `uncertainty` loses
+to a random draw on 5/5 seeds at five labels and 4/5 at ten. The mechanism is
+visible in what each strategy actually picks, against a cohort prevalence of
+20.5%:
+
+| strategy | fraction of the 5 chosen contacts that are really SOZ |
+|---|---|
+| `confident` | **57%** |
+| `rate` | 47% |
+| `uncertainty` | 27% |
+| `random` | 25% |
+
+Labelling near the decision boundary is efficient when labels are plentiful
+and the classes are balanced. With five labels and 20% prevalence, what you
+are short of is **positives**, and the contacts the model is unsure about are
+mostly ambiguous negatives. Uncertainty sampling spends a scarce budget on
+them.
+
+**`rate` needs no model at all** and is the best strategy at five and ten
+labels. "Label the five channels with the highest ripple rate" is a workflow
+that exists today, and it captures the whole of the available gain.
+
+### The caveat that decides whether this transfers
+
+`confident` and `uncertainty` both rank candidates with a *cohort* model, so
+they inherit the transfer problem section 2 measures. On simulated data where
+each patient has its own decision boundary, the cohort model ranks the
+target's contacts near-arbitrarily and `confident` becomes **worse** than
+random -- a test pins that. This is not a defect in the acquisition function;
+it is the same gap showing up one layer higher, and it is the strongest
+practical argument for `rate`, which reads a measured feature and needs
+nothing to transfer.
+
+---
+
 ## 3. Calibration and conformal prediction
 
 ```bash
@@ -296,6 +397,7 @@ python -m onset_hfo.learn cohort --dry-run        # plan, download nothing
 python -m onset_hfo.learn cohort                  # build the feature table
 python -m onset_hfo.learn evaluate                # the table in §2
 python -m onset_hfo.learn personalize            # the label-budget curve in §2b
+python -m onset_hfo.learn acquire                # which contacts to label, 2c
 python -m onset_hfo.learn uncertainty             # calibration + conformal + stress test
 python -m onset_hfo.learn fit --holdout sub-pt01 --out artifacts/models/soz.pkl
 ```
@@ -320,5 +422,5 @@ python -m onset_hfo.learn fit --holdout sub-pt01 --out artifacts/models/soz.pkl
 The nearest honest summary: the features carry real information about which
 contacts a clinician named, most of it does not transfer between patients, a
 handful of labels from the patient in front of you recovers a good part of
-what is lost, and the machinery to measure all three of those facts now exists
-and is tested.
+what is lost, choosing *which* handful is worth about as much again, and
+the machinery to measure all four of those facts now exists and is tested.

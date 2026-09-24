@@ -13,7 +13,7 @@ ruff, pytest. Linux, CPU only, no GPU, no model weights downloaded.
 | Check | Command | Result |
 |---|---|---|
 | Lint | `ruff check .` | clean |
-| Tests | `pytest -q` | **178 passed** in ~39 s, offline and *enforced* (`ONSET_HFO_OFFLINE`) |
+| Tests | `pytest -q` | **190 passed** in ~44 s, offline and *enforced* (`ONSET_HFO_OFFLINE`) |
 | Pipeline on synthetic data | `python -m onset_hfo.cli run --synthetic --figures` | completes in ~3 s; 6 figures written |
 | Pipeline on public data | `python -m onset_hfo.cli run --subject sub-pt01 --task ictal --run 01 --start 50 --stop 110 --figures` | 23.5 MB downloaded, 98 → 71 bipolar channels, **7.4 s** end to end |
 | Detector scores | `python -m onset_hfo.cli evaluate --seeds 1 7 42` | see below |

@@ -7,14 +7,16 @@ to use.
 Each item names the files it touches and roughly what is involved, so someone
 joining can pick one up without a handover meeting.
 
-> **Updated after a survey of what `ds003029` actually contains.** Three
-> entries changed status. Item 2 (outcome as reference standard) is now
-> *partly done*: the archive publishes curated SOZ contacts, not just outcome
-> scores, and `onset_hfo/cohort.py` reads them. Item 3 (electrode geometry) is
+> **Updated after building both halves on this archive.** Three entries
+> changed status. Item 2 (outcome as reference standard) is **done**: the
+> archive publishes curated SOZ contacts, `onset_hfo/cohort.py` reads them,
+> and the 22-subject cohort table is committed. Item 3 (electrode geometry) is
 > **not possible on this dataset** — there is no `electrodes.tsv` for any
-> subject. Item 8 (the agent) is largely built; what remains of it is now the
-> cohort run and the falsification tests. See
-> [`ORCHESTRATION.md`](ORCHESTRATION.md) §8 for the current boundary.
+> subject. Item 8 (the agent) is largely built, including the falsification
+> suite; what remains of it is a real language model driving the ladder, which
+> nothing else can substitute for. See
+> [`ORCHESTRATION.md`](ORCHESTRATION.md) §8 and
+> [`LOCALIZATION.md`](LOCALIZATION.md) §6 for the current boundary.
 
 ---
 
@@ -42,7 +44,7 @@ not there.
 
 ---
 
-## 2. Outcome as the reference standard — *the label layer is done; the cohort run is not*
+## 2. Outcome as the reference standard — *done; the ladder across the cohort is not*
 
 **What turned out to be true.** The archive carries more than outcome scores.
 `sourcedata/clinical_data_summary.xlsx` gives **curated clinician SOZ
@@ -52,25 +54,33 @@ the `S`/`F` outcome trap, and falls back to a local CSV or the free-text
 markers — recording which source it used. 32 of the 35 subjects with signals
 have a row, and parsed contact names match `channels.tsv` exactly.
 
-**What is still to do — and it is the single highest-value item left.** Run
-the pipeline (and the S0–S3 ladder) across those 32 subjects, not one. That
-gives:
+**The cohort run is done.** `onset_hfo/batch.py` analysed **22 of 31 planned
+subjects — 1466 channels, 301 labelled SOZ** — and the table is committed at
+`data/cohort/features.csv.gz`, so the modelling half runs with no download.
+`docs/LOCALIZATION.md` has the results: the learned model barely beats the
+rate it was built from (0.480 against 0.467 AUPRC), the within-subject ceiling
+is far above both (0.709), and five clinician-labelled contacts recover 38% of
+that gap.
 
-* per-rung SOZ localization with confidence intervals instead of one patient's
-  anecdote;
-* **leave-one-site-out generalization** across the four centres (NIH 14, UMMC
-  9, JHH 7, UMF 5) — the cross-site experiment, on public data, needing no
-  local cohort at all;
-* stratification by `seizure_free`, so the trustworthy positives (clinician
-  named it *and* the surgery worked) are scored separately from the ambiguous
-  ones.
+The nine exclusions are findings in their own right, and anyone planning a
+cross-site experiment on this archive needs them first: **four UMMC recordings
+sample at 250 Hz**, where an 80–250 Hz ripple is not measurable at all, and
+four UMF signal files are shorter than their own marked seizure time. So
+"leave-one-site-out" here is really NIH (13) against JHH (6), with UMF and
+UMMC contributing one and two subjects.
 
-Budget roughly 24 MB and 8 s of compute per subject-run. Expect a null result
-on the first pass — §6b of `EVALUATION.md` already reports one on `sub-pt01` —
-and report it.
+**What is still to do.** The S0–S3 ladder has only ever been run on one
+patient. Running it across the 22 gives per-rung SOZ localization with an
+interval around it instead of `sub-pt01`'s anecdote, and stratification by
+`seizure_free` so the trustworthy positives (clinician named it *and* the
+surgery worked) are scored apart from the ambiguous ones. It is cheap now that
+the recordings are cached — but it is worth doing **after** a real model has
+driven the ladder at all (item 8), because 22 patients' worth of scripted-
+planner numbers measure the script, not the thesis.
 
-**Touches.** new `onset_hfo/batch.py`, `docs/EVALUATION.md`. `cohort.py` and
-`onset_agent/scoring.py` already exist.
+**Touches.** `onset_agent/orchestrate.py` (a cohort loop over the ladder),
+`docs/EVALUATION.md`. `batch.py`, `cohort.py`, `models.py`, `uncertainty.py`
+and `onset_agent/scoring.py` already exist.
 
 ---
 
