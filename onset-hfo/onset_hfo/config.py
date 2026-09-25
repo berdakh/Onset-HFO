@@ -77,6 +77,12 @@ class DatasetSpec:
     default_run: str = "01"
     #: True when ``*_events.tsv`` carries expert HFO markings.
     has_hfo_annotations: bool = False
+    #: Path inside the archive to a clinical sheet naming the resected
+    #: contacts per subject, if the archive ships one. ``None`` means the
+    #: resected zone is unknown and no outcome study is possible.
+    clinical_sheet: str | None = None
+    #: True when ``participants.tsv`` carries post-surgical seizure outcome.
+    has_outcomes: bool = False
     license: str = "CC0"
     #: Public S3 mirror of the OpenNeuro bucket (no credentials, Range requests).
     base_url: str = "https://s3.amazonaws.com/openneuro.org"
@@ -118,6 +124,8 @@ DATASETS: dict[str, DatasetSpec] = {
         acq=None,
         default_run="01",
         has_hfo_annotations=True,
+        clinical_sheet="sourcedata/clinical_ch_sheet_zurich.xlsx",
+        has_outcomes=True,
     ),
 }
 
@@ -373,6 +381,17 @@ THRESHOLDS: dict[str, float] = {
     # Highest event-level F1 on the same cohort (0.418). Finds more events and
     # is wrong more often; prefer it when recall matters more than precision.
     "interictal-recall": 1.5,
+    # The same criterion measured in the FAST RIPPLE band on the same cohort,
+    # where the answer is 5.0 SD (rho 0.610, an interior maximum of a 2-10
+    # sweep) -- numerically the literature value, but arrived at by
+    # measurement and listed separately so the coincidence is not mistaken
+    # for a default nobody checked.
+    #
+    # The gap between this and ``interictal-agreement`` is the practical
+    # point: at 2.0 SD the fast-ripple detector runs at precision 0.086 and
+    # returns ~1,140 detections per 60 s against ~70 expert events. One
+    # threshold for both bands is not a simplification, it is a bug.
+    "interictal-agreement-fast-ripple": 5.0,
 }
 
 #: Version string stamped into every result table and report, so that a number

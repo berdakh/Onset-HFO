@@ -51,6 +51,7 @@ __all__ = [
     "load_example",
     "list_runs",
     "parse_marked_contacts",
+    "expand_contact_ranges",
     "seizure_marker_kind",
     "list_subjects",
     "read_tsv_text",
@@ -787,9 +788,22 @@ def parse_marked_contacts(
     return found
 
 
-def _expand_contact_tokens(text: str) -> list[str]:
-    """``"AD1-4, ATT1,2"`` -> ``["AD1", "AD2", "AD3", "AD4", "ATT1", "ATT2"]``."""
+def expand_contact_ranges(text: str) -> tuple[list[str], list[str]]:
+    """``"AD1-4, ATT1,2"`` -> ``(["AD1".."AD4", "ATT1", "ATT2"], [])``.
+
+    Clinicians write contact lists as shorthand ranges, in free text, in
+    several places in these archives: seizure markers in ``events.tsv`` and
+    the resected-zone column of the Zurich clinical sheet both use this
+    grammar. One parser serves both.
+
+    Returns the expanded contacts **and the chunks that could not be parsed**.
+    The second list is the point: real sheets contain typos (``ds003498``
+    writes ``1ll22-24`` where it means ``tll22-24``), and a parser that
+    silently returns fewer contacts turns a typo into a quietly wrong
+    denominator. Callers are expected to surface what came back unparsed.
+    """
     out: list[str] = []
+    unparsed: list[str] = []
     prefix = None
     for chunk in re.split(r"[,\s]+", text.strip()):
         if not chunk:
@@ -801,6 +815,8 @@ def _expand_contact_tokens(text: str) -> list[str]:
             hi = int(m.group(3)) if m.group(3) else lo
             if hi >= lo and hi - lo < 32:
                 out.extend(f"{prefix}{i}" for i in range(lo, hi + 1))
+            else:
+                unparsed.append(chunk)
             continue
         m = re.fullmatch(r"(\d{1,3})(?:-(\d{1,3}))?", chunk)
         if m and prefix:  # a bare number continues the previous prefix ("ATT1,2")
@@ -808,7 +824,16 @@ def _expand_contact_tokens(text: str) -> list[str]:
             hi = int(m.group(2)) if m.group(2) else lo
             if hi >= lo and hi - lo < 32:
                 out.extend(f"{prefix}{i}" for i in range(lo, hi + 1))
-    return out
+            else:
+                unparsed.append(chunk)
+            continue
+        unparsed.append(chunk)
+    return out, unparsed
+
+
+def _expand_contact_tokens(text: str) -> list[str]:
+    """The contacts named in a free-text marker, ignoring unparsable chunks."""
+    return expand_contact_ranges(text)[0]
 
 
 def _attach_annotations(raw: mne.io.BaseRaw, events: pd.DataFrame | None, t_start: float) -> None:

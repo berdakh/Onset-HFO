@@ -146,6 +146,37 @@ def _cmd_benchmark(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_outcome(args: argparse.Namespace) -> int:
+    """Ask whether the HFO map points at the tissue whose removal cured the patient."""
+    from onset_hfo.outcome import outcome_study
+
+    ensure_dirs()
+    threshold = args.threshold if args.threshold is not None else None
+    result = outcome_study(
+        subjects=args.subjects, n_subjects=args.n_subjects, dataset=args.dataset,
+        run=args.run, t_start=args.start, t_stop=args.stop,
+        detector=args.detector, threshold_sd=threshold, bands=tuple(args.bands),
+        drop_eloquent=not args.keep_eloquent)
+    if not len(result.subjects):
+        print("[onset-hfo] nothing measured: no subject had both a resected zone and a recording")
+        return 1
+    for metric in ("share_in_rz", "top_channel_resected", "top3_resected"):
+        print(f"\n[onset-hfo] {metric}, seizure-free vs recurrence:")
+        print(result.summary(metric).to_string(index=False))
+    metric, band = result.PRIMARY
+    if band in args.bands:
+        print(f"\n[onset-hfo] pre-specified comparison ({metric}, {band} band):")
+        print(f"   {result.verdict()}")
+    for other_band in args.bands:
+        for other_metric in ("share_in_rz", "top_channel_resected"):
+            if (other_metric, other_band) == result.PRIMARY:
+                continue
+            print(f"\n[onset-hfo] {other_metric}, {other_band} band: "
+                  f"{result.verdict(metric=other_metric, band=other_band)}")
+    result.save(args.out)
+    return 0
+
+
 def _cmd_runs(args: argparse.Namespace) -> int:
     from onset_hfo.datasets import list_runs
 
@@ -217,6 +248,28 @@ def build_parser() -> argparse.ArgumentParser:
                        choices=["ripple", "fast_ripple"])
     bench.add_argument("--out", default=None, help=f"output directory (default: {RESULTS_DIR})")
     bench.set_defaults(func=_cmd_benchmark)
+
+    out = sub.add_parser(
+        "outcome",
+        help="test the HFO map against post-surgical seizure outcome (ds003498)")
+    out.add_argument("--dataset", default="ds003498",
+                     help="dataset with a resected zone and outcomes (default: ds003498)")
+    out.add_argument("--subjects", nargs="+", default=None)
+    out.add_argument("--n-subjects", type=int, default=None)
+    out.add_argument("--run", default="01")
+    out.add_argument("--start", type=float, default=0.0)
+    out.add_argument("--stop", type=float, default=60.0)
+    out.add_argument("--detector", default="rms", choices=["rms", "line_length"])
+    out.add_argument("--threshold", type=float, default=None,
+                     help="one threshold for every band; default is the measured "
+                          "per-band operating point (2.0 SD ripples, 5.0 SD fast ripples)")
+    out.add_argument("--bands", nargs="+", default=["ripple", "fast_ripple"],
+                     choices=["ripple", "fast_ripple"])
+    out.add_argument("--keep-eloquent", action="store_true",
+                     help="keep contacts the source study excluded for evoked "
+                          "motor or language responses (default: drop them)")
+    out.add_argument("--out", default=None, help=f"output directory (default: {RESULTS_DIR})")
+    out.set_defaults(func=_cmd_outcome)
 
     runs = sub.add_parser("runs", help="list the runs available for a subject in the archive")
     runs.add_argument("--subject", default=DEFAULT_SUBJECT)

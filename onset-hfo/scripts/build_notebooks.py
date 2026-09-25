@@ -2,15 +2,21 @@
 
 The notebooks are committed to the repository (so that the Colab badges work),
 but they are *written* here, as plain Python, because reviewing a diff of
-notebook JSON is miserable and because it keeps the three notebooks consistent
+notebook JSON is miserable and because it keeps the notebooks consistent
 with each other.
 
-    python scripts/build_notebooks.py
+    python scripts/build_notebooks.py                  # write the JSON
+    python scripts/build_notebooks.py --execute        # write it and run it
+
+``--execute`` runs each notebook top to bottom and stores the outputs, which
+is how the committed copies get their figures and tables. It needs the data
+cache (or network access) and takes a while; pass notebook numbers to limit
+it, e.g. ``--execute 5``.
 
 Every notebook is designed to run top to bottom in a free Colab instance with
-no configuration. Notebook 1 downloads ~24 MB of public data; notebooks 2 and
-3 need no download at all (notebook 2 can optionally pull an open-weight
-model).
+no configuration. Notebook 1 downloads ~24 MB of public data and notebook 5
+about 480 MB (twenty subjects); notebooks 2, 3 and 4 need no download at all
+(notebook 2 can optionally pull an open-weight model).
 """
 
 from __future__ import annotations
@@ -1268,11 +1274,292 @@ end with explicit "what is not done" sections.
 ]
 
 
-def main() -> None:
+# =========================================================================
+# 5. The outcome study: HFOs against what happened to the patient
+# =========================================================================
+
+NB5 = "05_surgical_outcome_study.ipynb"
+nb5 = [
+    md(f"""
+# Onset-HFO 5 — Did the HFO map point at the tissue whose removal cured the patient?
+
+{badge(NB5)}
+
+Every other notebook here compares an algorithm to another algorithm, or to a
+human reading the same screen. This one compares it to **what happened to the
+patient after surgery** — the only reference standard in epilepsy surgery that
+is not another opinion.
+
+**The dataset makes it possible.** OpenNeuro `ds003498` (Zurich, 20 patients,
+interictal slow-wave sleep, 2000 Hz) ships three things in the same archive:
+expert HFO markings per channel, the **resected contacts** for each patient,
+and whether that patient became **seizure-free**. Almost no public iEEG
+dataset carries all three.
+
+**What you will do.** Reproduce a published finding from 60 seconds of
+recording per patient, then watch our own detector fail to reach it — which is
+the more useful of the two results, because it says precisely what to fix.
+
+**Runtime.** About 25 minutes on a free Colab instance, most of it downloading
+20 x ~24 MB slices. Everything is cached, so a second run is compute-only.
+"""),
+    code(SETUP),
+    md("""
+---
+## 1. The three ingredients
+
+Read them straight out of the archive before running anything, so you can see
+what the study is actually made of.
+"""),
+    code("""
+import warnings; warnings.filterwarnings("ignore")
+import pandas as pd
+from onset_hfo.clinical import fetch_participants, resection_map
+
+participants = fetch_participants("ds003498")
+print(participants[["subject", "epilepsy", "ilae", "outcome",
+                    "months_follow_up"]].to_string(index=False))
+print("\\nseizure-free (S) vs recurrence (F):",
+      participants["outcome"].value_counts().to_dict())
+"""),
+    md("""
+`S` means **success** — seizure free. `F` means **failure** — seizures
+returned. Reading `F` as "free" inverts every label in the cohort, which is
+why `onset_hfo.clinical` never exposes the raw letter without the mapping
+beside it.
+
+Now the resected zone. The archive stores it as a clinician's free text, one
+row per patient:
+"""),
+    code("""
+resections = resection_map("ds003498")
+for subject in ["sub-01", "sub-12", "sub-15"]:
+    r = resections[subject]
+    print(f"{subject}: rz text {r.rz_text!r}")
+    print(f"          -> {len(r.resected)} contacts: {', '.join(r.resected[:8])}"
+          + (" ..." if len(r.resected) > 8 else ""))
+    if r.eloquent:
+        print(f"          eloquent (excluded by the source study): {', '.join(r.eloquent)}")
+    if r.unparsed:
+        print(f"          COULD NOT PARSE: {r.unparsed}  <- reported, not silently dropped")
+"""),
+    md("""
+That last line is the point of the `unparsed` field. Subject 15's sheet says
+`1ll22-24` where every other token on the row says `tll` — a typo in the
+original clinical data. A parser that quietly returned the other three ranges
+would shrink that patient's excluded set with nothing to show for it.
+
+## 2. Contacts are not channels
+
+The sheet names **contacts** (`AHR1`). The analysis runs on **bipolar
+channels** (`AHR1-AHR2`), each spanning two contacts. So a channel is inside
+the resection, outside it, or — at the margin — straddling it:
+"""),
+    code("""
+from onset_hfo.clinical import classify_channels
+from onset_hfo.datasets import fetch_slice
+from onset_hfo.preprocess import prepare
+
+rec = fetch_slice(dataset="ds003498", subject="sub-01", run="01",
+                  t_start=0, t_stop=60, verbose=False)
+prep = prepare(rec, verbose=False)
+labels = classify_channels(prep.ch_names, resections["sub-01"])
+
+print(labels["zone"].value_counts().to_string())
+print("\\nthe resection margin (one contact in, one out):")
+print(labels[labels["zone"] == "partial"][["channel", "contact_a", "contact_b"]]
+      .to_string(index=False))
+print("\\nhow much of the resection this recording can even see:")
+print(resections["sub-01"].coverage(prep.ch_names))
+"""),
+    md("""
+**`partial` is kept as its own label on purpose.** Folding margin channels
+into "resected" inflates every "we got it all" number; folding them into
+"spared" inflates the opposite one. In the primary metric they sit in the
+denominator and not the numerator, so a detector firing along the margin gets
+no credit for it.
+
+**`rz_coverage` is the honest denominator.** In five of the twenty patients —
+all temporal-lobe cases, where the source study kept only the three most
+mesial bipolar channels — only 4 of 16 resected contacts were recorded at all.
+Their "share inside the resection" describes a quarter of a resection, and the
+study writes that number to `recordings.csv` rather than burying it.
+
+## 3. The design, before any numbers
+
+Four choices, each of which can only make the result *worse*:
+
+| Choice | Why |
+|---|---|
+| **An expert positive control** | Every number is computed twice — from the published expert markings and from our detector, on the same channels. Without it, a null is unreadable: it could be the detector or it could be 60 seconds and 20 patients. |
+| **Operating points fixed in advance** | 2.0 SD for ripples, 5.0 SD for fast ripples, both chosen in `benchmark.py` on *channel-rank agreement with the experts* — a question that says nothing about surgery. Tuning a threshold against outcome and then reporting the outcome would be circular. |
+| **Margin channels not claimed** | as above. |
+| **Both channel scopes reported** | `reviewed` (what the annotators marked) and `all` (what a deployed tool would face). Reporting only the flattering one is a choice made after seeing both. |
+
+## 4. Run it
+"""),
+    code("""
+from onset_hfo.outcome import outcome_study
+
+result = outcome_study(verbose=True)   # ~20 minutes cold, ~4 minutes cached
+result.save()
+"""),
+    md("""
+## 5. The metric that carries the signal
+
+Four metrics were computed. They disagree, and the disagreement is itself a
+finding.
+"""),
+    code("""
+pd.set_option("display.width", 220)
+print("--- was the single busiest channel resected? ---")
+print(result.summary("top_channel_resected")
+      .query("scope == 'reviewed'").to_string(index=False))
+print("\\n--- what fraction of all HFO events was inside the resection? ---")
+print(result.summary("share_in_rz")
+      .query("scope == 'reviewed'").to_string(index=False))
+"""),
+    md("""
+Read the `expert` / `fast_ripple` row of the first table first. The busiest
+fast-ripple channel was inside the resection in **12 of 13** patients who
+became seizure-free and **2 of 7** whose seizures returned — AUC 0.82,
+permutation p = 0.007. That is the published claim of Fedele et al. 2017, the
+study this dataset comes from, reproduced from one minute of recording per
+patient.
+
+Then read the same row of the second table: `share_in_rz` shows **nothing**,
+in the expert arm, on the same events. **Concentration localises; proportion
+does not.** "Most of this patient's HFOs were inside the resection" is largely
+a statement about how big the resection was. "The one place generating the
+most fast ripples was removed" is the clinically useful sentence — and it
+means any report built on this pipeline should show a *ranking*, not a
+percentage.
+
+## 6. Where our detector stands
+"""),
+    code("""
+print(result.verdict())          # the pre-specified comparison
+print()
+for key, text in result.verdicts().items():
+    if key.startswith("top_channel"):
+        print(f"{key}:\\n  {text}\\n")
+"""),
+    code("""
+subjects = result.subjects.merge(result.participants[["subject", "outcome"]], on="subject")
+view = subjects.query("band == 'fast_ripple' and scope == 'reviewed'")
+print(view[["subject", "outcome", "source", "n_events",
+            "share_in_rz", "top_channel_resected"]]
+      .sort_values(["outcome", "subject", "source"]).to_string(index=False))
+"""),
+    md("""
+Two things are visible in that table and in nothing else.
+
+**Our detector points the same way and does not get there** — 10 of 12 versus
+3 of 7, AUC 0.70, p = 0.13. This is the one configuration in the whole design
+that is evidence against *the detector* rather than against the sample size:
+the expert positive control cleared the bar on the same patients and the same
+channels. That gap is the most useful number in the repository, because it is
+a specific engineering target rather than a vague "needs more validation".
+
+**It is also event-starved.** At 5.0 SD in a 60-second window, five of twenty
+subjects yield one or zero fast-ripple detections, and `sub-10` yields none
+and drops out of that arm entirely (which is why its `n_seizure_free` reads 12,
+not 13). A per-patient statistic computed from a single event is not a
+measurement. The source study scored whole nights.
+
+## 7. Why the band matters, demonstrated
+
+The first version of this analysis used 2.0 SD in **both** bands, because that
+is what the ripple benchmark prefers. Here is what that does in the fast-ripple
+band:
+"""),
+    code("""
+wrong = outcome_study(subjects=[f"sub-{i:02d}" for i in range(1, 21)],
+                      threshold_sd=2.0,         # one threshold everywhere
+                      bands=("fast_ripple",), verbose=False)
+print("2.0 SD in both bands:")
+print(wrong.summary("top_channel_resected").query("scope == 'reviewed'").to_string(index=False))
+print("\\nmeasured per-band operating points:")
+print(result.summary("top_channel_resected")
+      .query("scope == 'reviewed' and band == 'fast_ripple'").to_string(index=False))
+"""),
+    md("""
+At 2.0 SD the fast-ripple detector runs at precision 0.086 — a mean of 1,142
+detections per 60 s against a mean of 228 expert-marked events — and the
+outcome signal disappears. Nothing about the outcome data was used to choose
+either threshold; both come from channel-rank agreement with the experts, in
+`notebooks/03_validation_and_benchmark.ipynb`. **One threshold for both bands
+is a bug, not a simplification.**
+
+## 8. Read this before quoting any of it
+
+- **Thirteen versus seven is a very small study.** `min_detectable_auc(13, 7)`
+  returns **0.85** — with these group sizes only a very large separation
+  reaches 80% power. A p above 0.05 here means *underpowered*, not *no effect*.
+- **Twenty-four comparisons, uncorrected.** The Bonferroni column is in
+  `groups.csv`; p = 0.007 becomes p = 0.17 across the table. The expert
+  fast-ripple row is worth reporting because it is a *pre-specified
+  replication* of the paper the dataset accompanies, not because it survived a
+  search.
+- **Sixty seconds of one night**, against several whole nights in the source
+  study. Try `outcome_study(t_stop=300)`.
+- **Retrospective, one centre, one surgical team.** The
+  [HFO Trial](https://www.thelancet.com/journals/laneur/article/PIIS1474-4422(22)00311-8/fulltext)
+  (Lancet Neurology 2022) tested HFO-guided resection prospectively and did not
+  find the benefit retrospective series report. This is a retrospective series.
+- **Reproducing a retrospective result is evidence that the analysis is sound,
+  not that the clinical claim is.**
+
+`docs/OUTCOME.md` carries the full design, every table, and the list of what
+this cannot support.
+"""),
+    code("""
+from onset_hfo.outcome import min_detectable_auc
+print("smallest AUC detectable at 80% power with 13 vs 7:",
+      min_detectable_auc(13, 7))
+print("\\nfiles written:")
+import pathlib
+for f in sorted(pathlib.Path("artifacts/results/outcome_ds003498").iterdir()):
+    print("  ", f.name)
+"""),
+]
+
+
+def execute(path: Path, timeout: int = 5400) -> None:
+    """Run a notebook in place and keep its outputs.
+
+    The committed notebooks carry their outputs so that a reader browsing on
+    GitHub sees the numbers without running anything. Regenerating a notebook
+    without re-executing it silently deletes those outputs, so this is how a
+    rebuild is meant to be done.
+    """
+    import nbformat
+    from nbclient import NotebookClient
+
+    notebook = nbformat.read(path, as_version=4)
+    client = NotebookClient(notebook, timeout=timeout, kernel_name="python3",
+                            resources={"metadata": {"path": str(path.parent.parent)}})
+    client.execute()
+    nbformat.write(notebook, path)
+
+
+def main(argv: list[str] | None = None) -> None:
+    import sys
+
+    argv = list(sys.argv[1:] if argv is None else argv)
+    run = "--execute" in argv
+    wanted = {int(a) for a in argv if a.isdigit()}
     NOTEBOOK_DIR.mkdir(parents=True, exist_ok=True)
-    for name, cells in [(NB1, nb1), (NB2, nb2), (NB3, nb3), (NB4, nb4)]:
+    for number, (name, cells) in enumerate(
+            [(NB1, nb1), (NB2, nb2), (NB3, nb3), (NB4, nb4), (NB5, nb5)], 1):
+        if wanted and number not in wanted:
+            continue
         path = write(name, cells)
         print(f"wrote {path} ({len(cells)} cells)")
+        if run:
+            print(f"  executing {name} ...", flush=True)
+            execute(path)
+            print(f"  done: {name}")
 
 
 if __name__ == "__main__":

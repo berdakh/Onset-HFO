@@ -33,7 +33,7 @@ result and what it does and does not support. One file, opens in a browser.
 
 Otherwise, run something:
 
-## Four notebooks, no setup
+## Five notebooks, no setup
 
 | | Notebook | What it does | Needs |
 |---|---|---|---|
@@ -41,6 +41,7 @@ Otherwise, run something:
 | 2 | [**Agentic analysis**](notebooks/02_agentic_analysis.ipynb) [![Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/berdakh/onset-hfo/blob/master/onset-hfo/notebooks/02_agentic_analysis.ipynb) | An open-weight model answering questions about those results, with citations, refusals and guards | nothing (a model is optional) |
 | 3 | [**Validation and benchmark**](notebooks/03_validation_and_benchmark.ipynb) [![Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/berdakh/onset-hfo/blob/master/onset-hfo/notebooks/03_validation_and_benchmark.ipynb) | Precision/recall against known truth, threshold curves, what each check buys | nothing |
 | 4 | [**Orchestration and localization**](notebooks/04_orchestration_and_localization.ipynb) [![Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/berdakh/onset-hfo/blob/master/onset-hfo/notebooks/04_orchestration_and_localization.ipynb) | The agent choosing what to measure, a learned per-contact model, conformal sets, and trying to break all of it | nothing |
+| 5 | [**Surgical outcome study**](notebooks/05_surgical_outcome_study.ipynb) [![Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/berdakh/onset-hfo/blob/master/onset-hfo/notebooks/05_surgical_outcome_study.ipynb) | Did the HFO map point at the tissue whose removal cured the patient? Reproduces a published finding, then shows our detector missing it | ~480 MB download |
 
 ## Or, locally, in two minutes
 
@@ -80,7 +81,13 @@ python -m onset_hfo.learn uncertainty        # calibration, conformal coverage
 # 7. measure the detectors against known truth
 python -m onset_hfo.cli evaluate --seeds 1 7 42
 
-pytest -q        # 190 tests, all offline, ~44 seconds
+# 8. score the detectors against expert HFO markings on 20 real subjects
+python -m onset_hfo.cli benchmark
+
+# 9. test the HFO map against what happened to the patients after surgery
+python -m onset_hfo.cli outcome
+
+pytest -q        # 236 tests, all offline
 ```
 
 ## What it actually does
@@ -131,6 +138,29 @@ And, in the other direction — the agent deciding what the pipeline measures:
 
 ## Results you can check
 
+**Against surgical outcome** — the strongest test here, and the only one whose
+reference standard is not another algorithm. 20 patients of ds003498, 60 s of
+interictal sleep each, resected contacts from the archive's clinical sheet,
+seizure outcome from `participants.tsv`:
+
+| source | metric | seizure-free (n=13) | recurrence (n=7) | AUC (95% CI) | p |
+|---|---|---|---|---|---|
+| **expert markings** | busiest fast-ripple channel was resected | **12/13** | **2/7** | **0.82 (0.64–1.00)** | **0.007** |
+| our RMS detector | same metric, same channels | 10/12 | 3/7 | 0.70 (0.49–0.92) | 0.13 |
+
+The first row reproduces [Fedele et al. 2017](https://www.nature.com/articles/s41598-017-13064-1)
+— the study this dataset comes from — in 60 seconds per patient. The second
+row is the honest measure of how far this prototype is from being useful: the
+expert positive control clears a bar our detector does not, on the same
+patients and the same channels, which makes that gap a statement about the
+detector rather than about the sample size. 13 vs 7 can only detect AUC ≥ 0.85
+at 80% power, and 24 comparisons were run uncorrected — read the p-values with
+[`docs/OUTCOME.md`](docs/OUTCOME.md) open.
+
+```bash
+python -m onset_hfo.cli outcome
+```
+
 **Against expert HFO markings** — 20 subjects of [ds003498](https://openneuro.org/datasets/ds003498)
 (Zurich interictal slow-wave sleep, 2000 Hz), 41,187 expert-marked events,
 scored only on the channels the annotators reviewed:
@@ -140,7 +170,9 @@ scored only on the channels the annotators reviewed:
 | ripple | RMS | 1.5 SD | 0.43 | 0.48 | **0.42** | 0.59 |
 | ripple | RMS | 2.0 SD | 0.51 | 0.38 | 0.40 | **0.66** |
 | ripple | RMS | 5.0 SD *(default)* | 0.59 | 0.12 | 0.17 | 0.37 |
-| fast ripple | RMS | 3.5 SD | 0.33 | 0.29 | 0.30 | 0.59 |
+| fast ripple | RMS | 3.5 SD | 0.33 | 0.29 | **0.30** | 0.59 |
+| fast ripple | RMS | 5.0 SD | 0.54 | 0.20 | 0.26 | **0.61** |
+| fast ripple | RMS | 2.0 SD | 0.09 | 0.53 | 0.15 | 0.44 |
 
 Read that as **agreement, not accuracy**: the reference is the validated
 output of another detector, so an event we find that it never proposed counts
@@ -149,8 +181,11 @@ published detector's validated events and rank the same channels active at
 ρ ≈ 0.66*.
 
 It also shows the shipped default is wrong for this task — 5.0 SD comes from
-the ictal literature and finds 12% of interictal markings. `--threshold
-interictal-agreement` (2.0 SD) is the measured operating point.
+the ictal literature and finds 12% of interictal ripple markings. `--threshold
+interictal-agreement` (2.0 SD) is the measured operating point **for ripples**.
+Fast ripples want 5.0 SD on the same cohort, and running 2.0 SD there drops
+precision to 0.09 and erases the outcome signal above. One threshold for both
+bands is a bug, not a simplification.
 
 **Against synthetic ground truth**, where every event is known by construction
 (three seeds, `python -m onset_hfo.cli evaluate`):
@@ -184,6 +219,7 @@ chance — see [`docs/EVALUATION.md`](docs/EVALUATION.md).
 | [`docs/ORCHESTRATION.md`](docs/ORCHESTRATION.md) | the tool contract, the evidence store, the S0–S3 ladder, and what verification costs |
 | [`docs/LOCALIZATION.md`](docs/LOCALIZATION.md) | the cohort, the learned per-contact model, calibration and conformal sets, and how much of it transfers |
 | [`docs/EVALUATION.md`](docs/EVALUATION.md) | what was measured, how, and what the numbers mean |
+| [`docs/OUTCOME.md`](docs/OUTCOME.md) | the surgical-outcome study: design, results, and what they cannot support |
 | [`docs/LIMITATIONS.md`](docs/LIMITATIONS.md) | what this must not be used for |
 | [`docs/GLOSSARY.md`](docs/GLOSSARY.md) | the clinical and signal-processing vocabulary, defined |
 | [`docs/ROADMAP.md`](docs/ROADMAP.md) | what to build next, in order, with the reasoning |
@@ -231,8 +267,8 @@ onset_agent/          the agent
   scoring.py          ranking vs clinician SOZ labels, with a permutation null
   orchestrate.py      python -m onset_agent.orchestrate ...
 
-notebooks/            the three Colab notebooks (built by scripts/build_notebooks.py)
-tests/                190 offline tests (synthetic data + a mock model server)
+notebooks/            the five Colab notebooks (built by scripts/build_notebooks.py)
+tests/                236 offline tests (synthetic data + a mock model server)
 docs/                 everything above
 ```
 

@@ -44,7 +44,29 @@ not there.
 
 ---
 
-## 2. Outcome as the reference standard — *done; the ladder across the cohort is not*
+## 2. Outcome as the reference standard — *done twice; the ladder across the cohort is not*
+
+**The stronger version is now built, on the other dataset.** ds003498 ships
+both halves of the question — which contacts were resected
+(`sourcedata/clinical_ch_sheet_zurich.xlsx`) and whether the patient became
+seizure-free (`participants.tsv`) — so the HFO map can be tested against
+surgery rather than against a clinician's marker. [`OUTCOME.md`](OUTCOME.md)
+has the design and the result: the expert markings reproduce the published
+finding (busiest fast-ripple channel inside the resection in 12/13
+seizure-free vs 2/7 recurrences, AUC 0.82, p = 0.007) and **our detector does
+not reach significance on the same metric** (AUC 0.70, p = 0.13).
+
+That gap is now the most valuable open item in this repository, and it is
+specific: on the channels that decide the question, what is our detector
+ranking that the experts are not? `artifacts/results/outcome_ds003498/channels.csv`
+has every channel of every patient with both counts side by side, which is
+where that investigation starts. Two leads worth taking first: the detector is
+event-starved in the fast-ripple band at 60 s (5 of 20 subjects yield ≤1
+detection), and it has no morphology criterion at all — the source study's
+detector had one.
+
+**The earlier, weaker version (ds003029, clinician SOZ contacts) is also
+done:**
 
 **What turned out to be true.** The archive carries more than outcome scores.
 `sourcedata/clinical_data_summary.xlsx` gives **curated clinician SOZ
