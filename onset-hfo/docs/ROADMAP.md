@@ -7,7 +7,15 @@ to use.
 Each item names the files it touches and roughly what is involved, so someone
 joining can pick one up without a handover meeting.
 
-> **Updated after building both halves on this archive.** Three entries
+> **Updated after the outcome study.** Item 1 (interictal recordings) is
+> **done** — every headline number now comes from `ds003498`. Item 2 is done
+> twice over, and what it produced is a **new item 10** which is now the top of
+> the list: the outcome study's conclusion changed when the analysis window
+> grew from 60 s to the whole 300 s run, so *ranking stability* displaced
+> *detector quality* as the thing to fix. Item 7 (whole recordings) is done for
+> the outcome study and not for the pipeline generally.
+>
+> **From the earlier round.** Three entries
 > changed status. Item 2 (outcome as reference standard) is **done**: the
 > archive publishes curated SOZ contacts, `onset_hfo/cohort.py` reads them,
 > and the 22-subject cohort table is committed. Item 3 (electrode geometry) is
@@ -20,9 +28,17 @@ joining can pick one up without a handover meeting.
 
 ---
 
-## 1. Interictal recordings — the one that changes the science
+## 1. Interictal recordings — *done*
 
-**Why.** Everything in this repository is measured on ictal data, because that
+**Status.** `ds003498` — Zurich interictal slow-wave sleep at 2000 Hz, with
+expert HFO markings — is wired in, and every headline number in the project now
+comes from it: the detector benchmark (`docs/EVALUATION.md` §0) and the outcome
+study (`docs/OUTCOME.md`). The ictal dataset remains as the quickstart example.
+Fast ripples are analysable there too, which they never were at 1000 Hz.
+
+The original reasoning, kept because it explains why this was item 1:
+
+**Why.** Everything in this repository was measured on ictal data, because that
 is what `ds003029` publishes with signals attached. The clinical HFO
 literature measures **interictal** rate, usually in slow-wave sleep. Until the
 pipeline runs on interictal data, its numbers cannot be compared to that
@@ -56,14 +72,24 @@ finding (busiest fast-ripple channel inside the resection in 12/13
 seizure-free vs 2/7 recurrences, AUC 0.82, p = 0.007) and **our detector does
 not reach significance on the same metric** (AUC 0.70, p = 0.13).
 
-That gap is now the most valuable open item in this repository, and it is
-specific: on the channels that decide the question, what is our detector
-ranking that the experts are not? `artifacts/results/outcome_ds003498/channels.csv`
-has every channel of every patient with both counts side by side, which is
-where that investigation starts. Two leads worth taking first: the detector is
-event-starved in the fast-ripple band at 60 s (5 of 20 subjects yield ≤1
-detection), and it has no morphology criterion at all — the source study's
-detector had one.
+**That gap was mostly the analysis window, which is a more important finding
+than the gap.** Re-running on whole 300-second runs instead of the first 60
+seconds moved the expert arm from AUC 0.82 (p = 0.007) to 0.71 (p = 0.12) and
+ours from 0.70 to 0.67 — the gap closed because the *expert* number came down,
+not because ours went up, and now nothing in the study reaches p < 0.05. Two
+patients account for all of it.
+
+So the top open item is **not** "make the detector better", it is
+**item&nbsp;10: is the channel ranking stable at all?** A `top_channel_resected`
+claim is an argmax over 6–65 channels whose Poisson rate intervals overlap.
+`metrics.py` already refuses to rank channels whose intervals overlap when it
+reports rates; the outcome metric does not, and it should. Adding that, and
+plotting AUC against window length (cheap — the recordings are cached after
+the first run), comes before any detector work.
+
+The detector still has no morphology criterion where the source study's did,
+and that remains worth building — just not as the thing that would have
+explained a gap the data says is mostly noise.
 
 **The earlier, weaker version (ds003029, clinician SOZ contacts) is also
 done:**
@@ -174,7 +200,15 @@ merging them into one rate.
 
 ---
 
-## 7. Scaling: whole recordings instead of one-minute slices
+## 7. Scaling: whole recordings instead of one-minute slices — *done for the outcome study*
+
+**Status.** `onset-hfo outcome` now defaults to the whole 300-second run rather
+than a 60-second slice, and 20 of them fit in memory one at a time without any
+streaming work. That was enough to discover that the answer *depends* on the
+window (item 10), which is the reason this item mattered. What remains is the
+general case: `run` and `benchmark` still take a slice, and nothing here
+streams, so a ten-minute or hour-long recording from another archive would not
+fit.
 
 **Why.** A minute is enough to demonstrate a method and not enough to measure a
 patient. Rates in clinical studies come from ten-minute or hour-long
@@ -236,6 +270,37 @@ every answer's citations resolving to the window the reader can see. Reuse
 
 ---
 
+## 10. Is the channel ranking stable? — *now the top item*
+
+**Why.** The outcome study's conclusion changed between a 60-second window and
+a 300-second one (§2), moving on two patients out of twenty. Every clinical
+claim this pipeline could ever make is a statement about *which channels*, so a
+ranking that moves when the window moves undermines all of them — and unlike
+most items here, this one is cheap and entirely offline once the recordings are
+cached.
+
+**What to do, in order.**
+
+1. **Window-length curve.** Run `outcome_study` at 30, 60, 120, 180, 240, 300 s
+   and plot AUC against window length, per source and band. If it has not
+   settled by 300 s, say so; the archive has 1–6 runs per subject, so the next
+   step is combining runs rather than lengthening one.
+2. **Top-k stability within a recording.** Ten non-overlapping windows from the
+   same run, same pipeline: how far does the top-5 move? This was already in
+   the open questions below as "the cheapest experiment in the list and
+   possibly the most informative". It is no longer optional.
+3. **Refuse to rank tied channels.** `metrics.rank_channels` already knows how
+   to decline when Poisson intervals overlap. `outcome._top_channel_resected`
+   and `_top_k_resected` take an argmax with no such check. Give them one, and
+   report the fraction of patients for whom the busiest channel is *not*
+   distinguishable from the runner-up — which on this cohort may well be most
+   of them.
+
+**Touches.** `onset_hfo/outcome.py`, `onset_hfo/metrics.py`, `docs/OUTCOME.md`,
+a new figure.
+
+---
+
 ## Open questions worth someone's attention
 
 * **Is the robustness rule the right rule?** `rank_channels` multiplies a
@@ -253,6 +318,8 @@ every answer's citations resolving to the window the reader can see. Reuse
 * **Does the bipolar montage help or hurt for ripple *rate* specifically?**
   Easy experiment, currently unmeasured: run the whole pipeline in referential
   and bipolar montages and compare rankings.
-* **How stable is the ranking across windows?** Ten one-minute windows from
-  the same recording, same pipeline: how much does the top-5 move? This is the
-  cheapest experiment in the list and possibly the most informative.
+* ~~**How stable is the ranking across windows?**~~ **Promoted to item 10**,
+  because the outcome study answered part of it by accident: the conclusion
+  moved between a 60 s and a 300 s window. It was described here as "the
+  cheapest experiment in the list and possibly the most informative", and that
+  turned out to be right.

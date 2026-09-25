@@ -8,7 +8,8 @@ in epilepsy surgery that is not another opinion.
 Run it:
 
 ```bash
-python -m onset_hfo.cli outcome            # ~5 minutes, 20 subjects, cached after the first run
+python -m onset_hfo.cli outcome            # 20 patients, whole recordings (~2.2 GB, ~25 min)
+python -m onset_hfo.cli outcome --stop 60  # the first minute only -- a different answer
 ```
 
 Everything below comes out of that command. Tables are in
@@ -18,31 +19,37 @@ Everything below comes out of that command. Tables are in
 
 ## The headline, in one paragraph
 
-On 60 seconds of interictal sleep from each of 20 patients, **the single
-channel with the most expert-marked fast ripples was inside the resection in
-12 of 13 patients who became seizure-free, and in only 2 of 7 whose seizures
-returned** (AUC 0.82, 95% CI 0.64–1.00, permutation p = 0.007). That is the
-published claim of Fedele et al. 2017 — the study this dataset comes from —
-reproduced here from one minute of recording per patient.
+**Nothing here separates the groups at p < 0.05, and the most important
+finding is that an earlier version of this analysis did.** On the whole
+recording (300 s per patient, every expert marking), the channel with the
+most expert-marked fast ripples was inside the resection in 11 of 13 patients
+who became seizure-free and 3 of 7 whose seizures returned — AUC 0.71, 95% CI
+0.50–0.92, permutation p = 0.12. Our detector, same channels, same metric:
+10 of 13 versus 3 of 7, AUC 0.67, p = 0.17.
 
-Our own detector, at its measured fast-ripple operating point, points the
-same way and does not get there: 10 of 12 versus 3 of 7, AUC 0.70,
-p = 0.13. **The gap between those two rows is the honest measure of how far
-this prototype is from clinical usefulness**, and it is the most valuable
-number in this repository.
+On the **first 60 seconds** of the same recordings, the same code, the same
+pre-specified metric, the expert arm gave AUC **0.82, p = 0.007** — which is
+what this document reported first, and what got put on the project's landing
+page. It does not survive using the other four minutes. Two patients account
+for the whole difference (§ "The window changes the answer"), which is what a
+20-patient study with a binary per-patient metric looks like when it is
+underpowered: individual patients move the result.
 
-Three things that gap is not:
+So the honest reading is **three statements, in this order**:
 
-- It is not a power problem *for the expert arm*. The expert arm cleared the
-  bar on the same 20 patients.
-- It is not hidden by the choice of metric. Every metric we computed is in
-  the table below, including the ones that show nothing.
-- It is not a result. p = 0.007 in a table of 24 comparisons is p = 0.17
-  after Bonferroni. What makes the expert row worth reporting is that it was
-  not found by searching: it is the specific claim of the paper the dataset
-  accompanies, tested in the direction that paper predicts.
-
----
+1. **The published retrospective claim is directionally reproduced and
+   statistically unsupported here.** Seizure-free patients are more likely to
+   have had their busiest fast-ripple channel removed (0.85 vs 0.43), the
+   effect is in the direction Fedele et al. 2017 predicts, and with 13 versus
+   7 patients it does not reach significance. That is a power statement, not a
+   refutation.
+2. **Our detector is close to the expert arm, not far from it.** AUC 0.67
+   against 0.71, with overlapping intervals. The gap the 60-second analysis
+   appeared to show (0.70 vs 0.82) largely closed — and it closed because the
+   *expert* number came down, not because ours went up.
+3. **The ranking is window-dependent, and that is now the most concrete
+   problem in this repository.** A conclusion that changes between minute one
+   and minutes one-to-five is not yet a measurement.
 
 ## How the question is posed
 
@@ -105,79 +112,129 @@ They disagree sharply, and that disagreement is a finding in itself — see
 
 ## Results
 
-Cohort: all 20 subjects, first 60 s of run-01, 2000 Hz. Detector: RMS, at the
-per-band operating points measured in [EVALUATION.md](EVALUATION.md) (2.0 SD
-ripples, 5.0 SD fast ripples). Scope `reviewed` = the channels the annotators
-marked; `all` = every channel surviving preprocessing.
+Cohort: all 20 subjects, **the whole run** (300 s, 2000 Hz), every expert
+marking. Detector: RMS, at the per-band operating points measured in
+[EVALUATION.md](EVALUATION.md) (2.0 SD ripples, 5.0 SD fast ripples). Scope
+`reviewed` = the channels the annotators marked; `all` = every channel
+surviving preprocessing.
 
-### `top_channel_resected` — the metric that carries the signal
+### `top_channel_resected` — the metric the source study's claim rests on
 
-| source | band | scope | seizure-free | recurrence | AUC (95% CI) | p | Bonferroni |
-|---|---|---|---|---|---|---|---|
-| **expert** | **fast ripple** | reviewed | **12/13 (0.92)** | **2/7 (0.29)** | **0.82 (0.64–1.00)** | **0.007** | 0.17 |
-| rms | fast ripple | reviewed | 10/12 (0.83) | 3/7 (0.43) | 0.70 (0.49–0.92) | 0.129 | 1.00 |
-| expert | ripple | reviewed | 5/13 (0.38) | 0/7 (0.00) | 0.69 (0.58–0.85) | 0.114 | 1.00 |
-| rms | ripple | reviewed | 6/13 (0.46) | 0/7 (0.00) | 0.73 (0.62–0.89) | 0.051 | 1.00 |
-| rms | fast ripple | all | 5/12 (0.42) | 3/7 (0.43) | 0.49 (0.27–0.72) | 1.000 | 1.00 |
+| source | band | scope | seizure-free | recurrence | AUC (95% CI) | p |
+|---|---|---|---|---|---|---|
+| expert | **fast ripple** | reviewed | **11/13 (0.85)** | **3/7 (0.43)** | **0.71 (0.50–0.92)** | 0.12 |
+| rms | fast ripple | reviewed | 10/13 (0.77) | 3/7 (0.43) | 0.67 (0.45–0.89) | 0.17 |
+| rms | ripple | reviewed | 8/13 (0.62) | 1/7 (0.14) | 0.74 (0.55–0.92) | 0.07 |
+| expert | ripple | reviewed | 4/13 (0.31) | 2/7 (0.29) | 0.51 (0.29–0.73) | 1.00 |
+| rms | fast ripple | all | 7/13 (0.54) | 3/7 (0.43) | 0.56 (0.34–0.78) | 1.00 |
 
 ### `share_in_rz` — the metric that carries nothing
 
 | source | band | scope | median (free) | median (recur) | AUC (95% CI) | p |
 |---|---|---|---|---|---|---|
-| expert | fast ripple | reviewed | 0.50 | 0.30 | 0.57 (0.26–0.87) | 0.643 |
-| rms | fast ripple | reviewed | 0.63 | 0.18 | 0.73 (0.45–0.94) | 0.115 |
-| expert | ripple | reviewed | 0.18 | 0.30 | 0.43 (0.16–0.70) | 0.643 |
-| rms | ripple | reviewed | 0.39 | 0.36 | 0.54 (0.27–0.81) | 0.817 |
+| expert | fast ripple | reviewed | 0.50 | 0.41 | 0.48 (0.22–0.77) | 0.94 |
+| rms | fast ripple | reviewed | 0.80 | 0.22 | 0.71 (0.46–0.91) | 0.14 |
+| expert | ripple | reviewed | 0.19 | 0.30 | 0.41 (0.15–0.68) | 0.54 |
+| rms | ripple | reviewed | 0.48 | 0.38 | 0.52 (0.24–0.79) | 0.94 |
 
-`top3_resected` sits between the two, with nothing significant in any arm.
-The full table — every metric, source, scope and band — is `groups.csv`.
+`top3_resected` sits between the two (expert fast ripple AUC 0.63, p = 0.35).
+Nothing in any arm reaches p < 0.05. The full table — every metric, source,
+scope and band — is `groups.csv`.
+
+---
+
+## The window changes the answer
+
+This is the finding worth more than any row above, and it exists only because
+the analysis was re-run on the full recording rather than declared finished on
+the first minute.
+
+| | expert, fast ripple | rms, fast ripple |
+|---|---|---|
+| **first 60 s** | 12/13 vs 2/7 — AUC **0.82**, p = **0.007** | 10/12 vs 3/7 — AUC 0.70, p = 0.13 |
+| **whole 300 s** | 11/13 vs 3/7 — AUC 0.71, p = 0.12 | 10/13 vs 3/7 — AUC 0.67, p = 0.17 |
+
+Five times the data, a weaker result. Two patients account for all of it:
+
+- **sub-18** (recurrence). In the first minute the busiest expert-marked
+  fast-ripple channel was outside the resection; over five minutes it is
+  inside. A recurrence patient whose HFO focus *was* removed counts against
+  the hypothesis, so this flip costs twice.
+- **sub-15** (seizure-free). The opposite: inside at 60 s, outside at 300 s.
+
+Our detector moved on two patients as well (sub-14 flipped out; sub-10, which
+produced no fast-ripple detections at all in 60 s, produced 15 in 300 s and
+rejoins the cohort — which is why its `n` goes from 12 to 13).
+
+Three things follow, and they are the actionable part of this document:
+
+**The 60-second number should never have been the headline.** It was not
+cherry-picked — 60 s was chosen for download size before any outcome data was
+touched, and the metric and band were pre-specified — but a window short
+enough to change the conclusion is not a defensible analysis window, and the
+default is now the whole run. Anything published from the 60 s window is
+superseded by the table above.
+
+**"Which channel is busiest" is a fragile statistic on this much data.** It is
+an argmax over 6–65 channels whose rates have overlapping confidence
+intervals. `metrics.py` already refuses to rank channels whose Poisson
+intervals overlap when it reports rates; this metric does not, and it should.
+That is a specific, small piece of work.
+
+**A 20-patient study cannot distinguish these two results from each other.**
+`min_detectable_auc(13, 7)` = 0.85. Both 0.82 and 0.71 sit below that floor,
+so neither run had the power to establish its own number. The difference
+between them is noise of exactly the size this cohort produces.
 
 ---
 
 ## What the numbers say
 
-**Fast ripples localise; ripples do not.** Every arm that shows anything is a
-fast-ripple arm. The expert ripple arm reaches AUC 0.69 and p = 0.11; the
-expert fast-ripple arm reaches 0.82 and p = 0.007 on the same patients, the
-same channels and the same metric. This matches the clinical literature,
-which has held for a decade that ripples are the less specific marker, and it
-is the reason these 2 kHz recordings matter: the project's other dataset is
-sampled at 1 kHz and cannot support fast-ripple analysis at all.
+**Fast ripples localise better than ripples in the expert arm; in ours the two
+bands are indistinguishable.** For the experts, fast ripples give AUC 0.71
+against 0.51 for ripples, on the same patients, channels and metric — matching
+a decade of clinical literature holding that ripples are the less specific
+marker. For our detector the ripple arm (0.74, p = 0.07) actually edges the
+fast-ripple arm (0.67, p = 0.17), and the intervals overlap heavily. Read that
+as "our detector does not reproduce the band distinction", not as "ripples are
+better": with this cohort neither number is established, and taking the
+larger one because it is larger is the error this document exists to avoid.
+Either way, it is why these 2 kHz recordings matter — the project's other
+dataset is 1 kHz and cannot support fast-ripple analysis at all.
 
 **Concentration localises; proportion does not.** `share_in_rz` shows nothing
-even in the expert arm, while `top_channel_resected` on the same events gives
-AUC 0.82. The clinically useful statement is not *most of this patient's HFOs
-were in the resection* — that is mostly a statement about how large the
-resection was — but *the one place generating the most fast ripples was
-removed*. Anyone building a report from this pipeline should show a ranking,
-not a percentage.
+in the expert arm at all (AUC 0.48 — a coin flip), while
+`top_channel_resected` on exactly the same events gives 0.71. The clinically
+useful statement is not *most of this patient's HFOs were in the resection* —
+that is largely a statement about how large the resection was — but *the one
+place generating the most fast ripples was removed*. Anyone building a report
+from this pipeline should show a ranking, not a percentage. This is the one
+conclusion that held identically at both window lengths.
 
 **Band-specific operating points are not a refinement, they are the
 difference between a result and noise.** The first version of this analysis
 used 2.0 SD in both bands, because that is the value the ripple benchmark
-prefers. In the fast-ripple band 2.0 SD runs at precision 0.086 — a mean of 1,142
-detections per 60 s against a mean of 228 expert-marked fast ripples — and
-the detector's
-outcome arm was correspondingly flat (AUC 0.59, p = 0.64). At the
-fast-ripple band's own measured operating point (5.0 SD, rank ρ 0.610) the
-same code gives AUC 0.70. Nothing about the outcome data was used to pick
+prefers. In the fast-ripple band 2.0 SD runs at precision 0.086 — a mean of
+1,142 detections per 60 s against a mean of 228 expert-marked fast ripples —
+and the detector's outcome arm was correspondingly flat. At the fast-ripple
+band's own measured operating point (5.0 SD, rank ρ 0.610) the same code
+recovers a usable ranking. Nothing about the outcome data was used to pick
 either number; both come from channel-rank agreement with the experts, which
 is a different question on data that says nothing about surgery.
 
-**Our detector is event-starved at that operating point.** Five of twenty
-subjects yield one or zero fast-ripple detections in 60 s, and one (sub-10)
-yields none at all and is dropped from that arm. A per-patient statistic
-computed from a single event is not a measurement. This is a limit of the
-60-second window, not of the threshold: the source study scored whole nights.
+**The event-starvation problem was real and the full run fixes it.** At 5.0 SD
+in 60 s, five of twenty subjects yielded one or zero fast-ripple detections
+and sub-10 yielded none at all, so a per-patient statistic was being computed
+from a single event. Over 300 s every subject produces detections and the
+cohort is complete. That was a genuine defect of the 60-second window — it is
+just not the defect that was holding the detector back.
 
-**A negative result that is about us.** On the metric where the experts
-separate the groups cleanly, our detector does not. That is the one
-configuration in this design that is evidence against the detector rather
-than against the sample size — it is exactly what the expert positive control
-was built to distinguish — and it is the concrete target for the next version
-of the detector.
-
----
+**The positive control did its job, and what it revealed was not what it was
+built to reveal.** It was built to tell "our detector is worse than the
+experts" apart from "this study is underpowered". The 60-second run looked
+like the first. The full run says the second: expert 0.71 and ours 0.67, both
+null, intervals almost entirely overlapping. A control that changes the
+conclusion when you give it more data has earned its place.
 
 ## What this cannot support
 
@@ -187,12 +244,18 @@ of the detector.
   effect". Every row carries an effect size and a bootstrap CI for that
   reason.
 - **Twenty-four comparisons, uncorrected.** The Bonferroni column is in the
-  table. Read the expert fast-ripple row as a *replication of a
-  pre-specified published claim*, and every other row as hypothesis-
-  generating.
-- **Sixty seconds of one night** is not what the source study used, and the
-  patients contributed 1–6 nights each. Run `--stop 300` for five minutes per
-  patient; the loader will fetch the extra bytes.
+  table; on the full run nothing survives it, and nothing reaches p < 0.05
+  uncorrected either. Read every row as hypothesis-generating.
+- **The published headline changed once already.** The 60-second version of
+  this analysis reported AUC 0.82, p = 0.007 and it reached the project's
+  README and landing page before the full run was done. Both are now corrected
+  to the table above. Treat that as the calibration for how much weight any
+  single number in this document can carry.
+- **One full run of one night** is not what the source study used: the
+  patients contributed 1–6 nights each and it scored all of them. The archive
+  has 1–6 runs per subject; combining them is the obvious next extension, and
+  given how much the answer moved between one minute and five, it should be
+  done before any number here is quoted as stable.
 - **One run per patient, no cross-validation, no held-out set.** Nothing here
   is a model that was fitted, so there is nothing to hold out — but there is
   also nothing here that has been shown to generalise to another cohort.
@@ -207,8 +270,9 @@ of the detector.
 ## Reproducing and extending
 
 ```bash
-python -m onset_hfo.cli outcome                        # the table above
-python -m onset_hfo.cli outcome --stop 300             # five minutes per patient
+python -m onset_hfo.cli outcome                        # the table above (whole runs)
+python -m onset_hfo.cli outcome --stop 60              # the first minute: a different answer
+python -m onset_hfo.cli outcome --stop 120 --out a     # your own window-sensitivity check
 python -m onset_hfo.cli outcome --threshold 3.0        # one threshold in every band
 python -m onset_hfo.cli outcome --detector line_length
 python -m onset_hfo.cli outcome --keep-eloquent        # keep stimulation-positive contacts
@@ -228,6 +292,12 @@ result.save()
 `result.channels` has every channel of every subject with its zone, its
 expert event count and ours — which is where to look first when a subject's
 number is surprising.
+
+**If you extend one thing, extend this.** Run the study at several window
+lengths and plot the AUC against window length. Everything above says that
+curve has not settled by 300 s, and it is the cheapest experiment left:
+the recordings are already cached after the first run, so every further window
+is compute only.
 
 ### Files written
 
