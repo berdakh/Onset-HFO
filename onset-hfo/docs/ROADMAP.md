@@ -270,7 +270,7 @@ every answer's citations resolving to the window the reader can see. Reuse
 
 ---
 
-## 10. Is the channel ranking stable? — *measured; step 3 remains*
+## 10. Is the channel ranking stable? — *steps 1-3 done; step 4 open*
 
 **Why.** The outcome study's conclusion changed between a 60-second window and
 a 300-second one (§2), moving on two patients out of twenty. Every clinical
@@ -294,13 +294,25 @@ and `docs/OUTCOME.md` has the figure and the tables. What they found:
   the experts), because the top few channels are often all inside or all
   outside the resection.
 
-**Step 3 is what remains, and the last bullet is the argument for it.**
-`metrics.rank_channels` already declines to order channels whose Poisson
-intervals overlap. `outcome._top_channel_resected` and `_top_k_resected` take
-an argmax with no such check. Give them one; report a *set* of candidate
-channels rather than a winner, plus the fraction of patients for whom the
-busiest channel is not distinguishable from the runner-up. Then re-run the
-outcome study and see whether refusing to guess costs anything.
+**Step 3 is done.** `outcome.candidate_channels` applies the same rule
+`metrics.leader_separation` uses -- a channel is tied with the leader when its
+Poisson interval overlaps the leader's -- and `candidates_resected` reports
+the share of the tied set that was removed. It reduces to the old metric
+exactly when the set has one member. What it found:
+
+* **The data picks a single channel in fewer than half the patients**: 9/20
+  for the experts, 8/20 for us, median set size 2, worst case 24 tied
+  channels out of 37. `top_channel_resected` was naming a winner that had not
+  been chosen.
+* **Honesty is nearly free at the group level**: AUC 0.709 -> 0.692 for the
+  experts, unchanged at 0.670 for us.
+* **Per-patient values move less** across disjoint windows (mean movement
+  0.55 -> 0.30 expert, 0.20 -> 0.18 ours), **but the group statistic is not
+  thereby stabilised** -- its spread halves for the experts and more than
+  doubles for us, because in a 60 s window our detector sees a median of 30
+  fast-ripple events, its intervals are wide, and the set size itself becomes
+  noisy. Candidate sets do not rescue a short window; they make its
+  uncertainty visible.
 
 **Step 4, newly implied.** The curve settles within one run but a patient has
 1–6 runs in the archive, recorded on different nights. Combining them is now

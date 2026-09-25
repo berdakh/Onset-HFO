@@ -97,6 +97,7 @@ from onset_hfo.preprocess import prepare
 
 __all__ = [
     "OutcomeResult",
+    "candidate_channels",
     "outcome_subject",
     "outcome_study",
     "compare_groups",
@@ -317,6 +318,65 @@ def _share_in_resection(rates: pd.Series, zones: pd.Series) -> dict:
     }
 
 
+def candidate_channels(counts: pd.Series, duration_min: float,
+                       alpha: float = 0.05) -> list[str]:
+    """The channels that cannot be told apart from the busiest one.
+
+    A channel joins the set when its Poisson rate interval overlaps the
+    leader's -- the same rule :func:`onset_hfo.metrics.leader_separation`
+    already uses to decide whether a recording has a leader at all. It is a
+    statement about intervals rather than a tuned constant, so it tightens by
+    itself as the analysed window grows.
+
+    The set exists because of a measurement, not a preference: across five
+    disjoint minutes of the same ``ds003498`` recordings, the experts' busiest
+    fast-ripple channel is the same channel in only 7 of 20 patients (see
+    ``docs/OUTCOME.md``). An argmax over channels whose intervals overlap
+    reports one of them as though the data had chosen it. Naming the whole
+    tied set instead is what the data actually supports, and it is what a
+    surgeon should be shown.
+
+    Returned in descending rate order, ties broken by channel name so the
+    same data always yields the same set.
+    """
+    from onset_hfo.metrics import poisson_ci
+
+    counts = counts[counts.notna()]
+    if not len(counts) or not counts.sum() or duration_min <= 0:
+        return []
+    ordered = counts.sort_index(kind="mergesort").sort_values(
+        ascending=False, kind="mergesort")
+    intervals = {ch: poisson_ci(int(n), duration_min, alpha=alpha)
+                 for ch, n in ordered.items()}
+    leader_low = intervals[ordered.index[0]][0]
+    return [ch for ch in ordered.index if intervals[ch][1] >= leader_low]
+
+
+def _candidate_metrics(rates: pd.Series, zones: pd.Series, duration_min: float) -> dict:
+    """The tie-aware version of "did the surgeon remove what the map pointed at".
+
+    ``candidates_resected`` is the share of the tied set that was removed. It
+    reduces to :func:`_top_channel_resected` exactly when the set has one
+    member, so it is a strict generalisation rather than a different question.
+
+    ``leader_alone`` records how often the data picked a single channel at
+    all. On this cohort it is the number worth knowing: a metric that looks
+    decisive while resting on a set of eleven tied channels is not measuring
+    what its name says.
+    """
+    candidates = candidate_channels(rates, duration_min)
+    if not candidates:
+        return {"n_candidates": 0, "candidates_resected": float("nan"),
+                "candidates_all_resected": float("nan"), "leader_alone": float("nan")}
+    inside = [c for c in candidates if zones.loc[c] == "resected"]
+    return {
+        "n_candidates": len(candidates),
+        "candidates_resected": len(inside) / len(candidates),
+        "candidates_all_resected": float(len(inside) == len(candidates)),
+        "leader_alone": float(len(candidates) == 1),
+    }
+
+
 def _top_k_resected(rates: pd.Series, zones: pd.Series, k: int = 3) -> float:
     """Share of the ``k`` most active channels that were removed.
 
@@ -420,6 +480,7 @@ def outcome_subject(subject: str, resection, run: str = "01",
                     **_share_in_resection(rates, zones),
                     "top_channel_resected": _top_channel_resected(rates, zones),
                     "top3_resected": _top_k_resected(rates, zones, k=3),
+                    **_candidate_metrics(rates, zones, prep.duration / 60.0),
                 })
         for channel in prep.ch_names:
             channel_rows.append({
@@ -546,7 +607,9 @@ class OutcomeResult:
 
 def compare_groups(subjects: pd.DataFrame, participants: pd.DataFrame,
                    metrics: tuple[str, ...] = ("share_in_rz", "share_in_rz_incl_partial",
-                                               "top_channel_resected", "top3_resected"),
+                                               "top_channel_resected", "top3_resected",
+                                               "candidates_resected",
+                                               "candidates_all_resected"),
                    seed: int = 0) -> pd.DataFrame:
     """Seizure-free vs recurrence, for every (source, scope, band, metric)."""
     merged = subjects.merge(participants[["subject", "outcome"]], on="subject", how="left")
