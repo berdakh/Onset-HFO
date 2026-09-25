@@ -59,9 +59,25 @@ Analysable at last: these recordings are 2000 Hz, the ictal one was 1000.
 
 | detector | threshold | precision | recall | F1 | rank ρ | top-5 shared |
 |---|---|---|---|---|---|---|
+| RMS | 2.0 SD | 0.086 | 0.529 | 0.145 | 0.436 | 3.40 / 5 |
+| RMS | 3.0 SD | 0.235 | 0.351 | 0.275 | 0.520 | 3.45 / 5 |
 | RMS | 3.5 SD | 0.329 | 0.291 | **0.296** | 0.590 | 3.70 / 5 |
-| RMS | 5.0 SD | 0.543 | 0.204 | 0.264 | **0.610** | 3.55 / 5 |
+| RMS | 4.0 SD | 0.411 | 0.250 | 0.291 | 0.585 | 3.65 / 5 |
+| RMS | **5.0 SD** | 0.543 | 0.204 | 0.264 | **0.610** | 3.55 / 5 |
+| RMS | 6.0 SD | 0.632 | 0.170 | 0.230 | 0.580 | 3.35 / 5 |
+| RMS | 8.0 SD | 0.720 | 0.112 | 0.161 | 0.543 | 3.05 / 5 |
+| RMS | 10.0 SD | 0.710 | 0.083 | 0.122 | 0.509 | 3.20 / 5 |
 | line length | 5.0 SD | 0.643 | 0.173 | 0.234 | 0.560 | 3.45 / 5 |
+
+**The two bands want different operating points, by a factor of two and a
+half.** Ripples rank best at 2.0 SD, fast ripples at 5.0 SD — an interior
+maximum of a 2–10 sweep, not a boundary. Running the ripple value in the
+fast-ripple band costs precision 0.543 → 0.086: a mean of 1,142 detections
+per 60 s against a mean of 228 expert-marked fast ripples. A single
+threshold for both bands is not a simplification, it is a bug, and
+[OUTCOME.md](OUTCOME.md) shows what it costs downstream. `config.THRESHOLDS`
+now carries `interictal-agreement-fast-ripple` alongside the ripple values,
+and `onset_hfo.outcome.BAND_THRESHOLD_SD` maps bands to them.
 
 ### What these numbers say
 
@@ -97,6 +113,26 @@ simulated signal is a comparison of simulators.
 channels range from 6 to 65, expert events per 60 s from 644 to 7,935, and
 per-subject best F1 from 0.14 to 0.56 (median 0.48). `artifacts/results/benchmark_ds003498/scores.csv`
 has every row.
+
+---
+
+## 0b. Scored against surgical outcome
+
+The strongest test in the repository lives in its own document, because it
+compares the pipeline to something no algorithm produced:
+**[OUTCOME.md](OUTCOME.md)** — did the HFO map point at the tissue whose
+removal made the patient seizure-free?
+
+The short version. Expert markings, fast-ripple band: the busiest channel
+was inside the resection in 12 of 13 seizure-free patients and 2 of 7
+recurrences (AUC 0.82, p = 0.007). Our detector on the same channels: 10 of
+12 versus 3 of 7, AUC 0.70, p = 0.13. The expert positive control clears the
+bar the detector does not, on 20 patients and 60 seconds each, which makes
+that gap a statement about the detector rather than about the sample size.
+
+```bash
+python -m onset_hfo.cli outcome
+```
 
 ---
 
@@ -331,7 +367,7 @@ unmeasured, and is the first experiment to run.
 
 ## 7. Test suite
 
-`pytest -q` — 190 tests, entirely offline, about forty seconds. They cover the
+`pytest -q` — 236 tests, entirely offline. They cover the
 primitives (robust scale, sliding features, threshold segmentation, bipolar
 pairing), the detectors (hot channels found, events are oscillations, a flat
 channel yields nothing, thresholds behave monotonically, reruns are

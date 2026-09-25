@@ -28,16 +28,20 @@ Read in this order:
    the paper each came from and the reason for each deviation.
 4. [**EVALUATION.md**](EVALUATION.md) — what has been measured, on what, and
    what the numbers do and do not support.
-5. [**AGENT.md**](AGENT.md) — how a language model is allowed near clinical
+5. [**OUTCOME.md**](OUTCOME.md) — the one test whose reference standard is
+   not another algorithm: did the HFO map point at the tissue whose removal
+   made the patient seizure-free? Includes the expert positive control that
+   tells an underpowered null apart from a detector that does not work.
+6. [**AGENT.md**](AGENT.md) — how a language model is allowed near clinical
    data at all: the tools, the guards, and the threat model.
-6. [**ORCHESTRATION.md**](ORCHESTRATION.md) — the other direction: the model
+7. [**ORCHESTRATION.md**](ORCHESTRATION.md) — the other direction: the model
    choosing and parameterising the analyses, the frozen tool contract, the
    evidence store, the S0–S3 ablation ladder, and what verification costs.
-7. [**LOCALIZATION.md**](LOCALIZATION.md) — the learned half: the cohort, the
+8. [**LOCALIZATION.md**](LOCALIZATION.md) — the learned half: the cohort, the
    per-contact model, calibration and conformal prediction sets, and the
    measured gap between a subject-specific model and one that has to work on
    a new patient.
-8. [**LIMITATIONS.md**](LIMITATIONS.md) — read before quoting any number from
+9. [**LIMITATIONS.md**](LIMITATIONS.md) — read before quoting any number from
    this repository to anyone.
 
 ## "I am joining the project and need to do something useful"
@@ -60,6 +64,8 @@ Read in this order:
 | What exactly can the agent see? | [`onset_hfo/store.py`](../onset_hfo/store.py) and [`onset_agent/tools.py`](../onset_agent/tools.py) |
 | What stops the model inventing a number? | [`onset_agent/guard.py`](../onset_agent/guard.py) |
 | What does the report contain? | [`onset_hfo/report.py`](../onset_hfo/report.py) |
+| Which contacts were resected, and how is that mapped to channels? | [`onset_hfo/clinical.py`](../onset_hfo/clinical.py) |
+| How is the outcome study computed, and what are its statistics? | [`onset_hfo/outcome.py`](../onset_hfo/outcome.py) |
 
 ## A note on how this repository is written
 

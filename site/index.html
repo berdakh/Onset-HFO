@@ -125,8 +125,9 @@ footer a { color: var(--ink-2); }
 
 <h2>Run it, right now, with no setup</h2>
 <p>
-  Three notebooks, each opening straight into Google Colab. The first downloads
-  24&nbsp;MB of real recording; the other two need no download at all.
+  Five notebooks, each opening straight into Google Colab. Notebook&nbsp;1
+  downloads 24&nbsp;MB of real recording and notebook&nbsp;5 about 480&nbsp;MB
+  (twenty patients); the rest need no download at all.
 </p>
 
 <div class="cards">
@@ -147,6 +148,18 @@ footer a { color: var(--ink-2); }
     <h3>Validation and benchmark</h3>
     <p>Precision and recall against known truth, the threshold curve, and what each rejection criterion actually buys.</p>
     <a class="btn" href="https://colab.research.google.com/github/berdakh/onset-hfo/blob/master/onset-hfo/notebooks/03_validation_and_benchmark.ipynb">Open in Colab &rarr;</a>
+  </div>
+  <div class="card">
+    <p class="num">Notebook 4</p>
+    <h3>Orchestration and localization</h3>
+    <p>The model choosing what to measure rather than only reading it, a learned per-contact model, conformal prediction sets, and a suite built to break all of it.</p>
+    <a class="btn" href="https://colab.research.google.com/github/berdakh/onset-hfo/blob/master/onset-hfo/notebooks/04_orchestration_and_localization.ipynb">Open in Colab &rarr;</a>
+  </div>
+  <div class="card">
+    <p class="num">Notebook 5</p>
+    <h3>Surgical outcome study</h3>
+    <p>The one test whose reference standard is not another algorithm: did the HFO map point at the tissue whose removal cured the patient? Reproduces a published finding &mdash; then shows our own detector missing it.</p>
+    <a class="btn" href="https://colab.research.google.com/github/berdakh/onset-hfo/blob/master/onset-hfo/notebooks/05_surgical_outcome_study.ipynb">Open in Colab &rarr;</a>
   </div>
 </div>
 
@@ -183,10 +196,46 @@ pytest -q                                             # 58 tests, offline</code>
 </ul>
 
 <h2>What it measures</h2>
+
+<h3>Against surgical outcome</h3>
 <p>
-  Scored against <strong>expert HFO markings</strong> on 20 subjects of the
-  Zurich interictal sleep dataset &mdash; 41,187 marked events, counted only on
-  the channels the annotators actually reviewed:
+  Twenty patients, 60&nbsp;seconds of interictal sleep each, the resected
+  contacts read from the archive's clinical sheet and seizure outcome from
+  <code>participants.tsv</code>. The question: was the channel generating the
+  most fast ripples inside the tissue the surgeon removed?
+</p>
+<table>
+  <thead><tr><th>HFO source</th><th class="num">Seizure-free (n=13)</th><th class="num">Recurrence (n=7)</th><th class="num">AUC (95% CI)</th><th class="num">p</th></tr></thead>
+  <tbody>
+    <tr><td><strong>Expert markings</strong></td><td class="num"><strong>12 / 13</strong></td><td class="num"><strong>2 / 7</strong></td><td class="num"><strong>0.82 (0.64&ndash;1.00)</strong></td><td class="num"><strong>0.007</strong></td></tr>
+    <tr><td>Our RMS detector</td><td class="num">10 / 12</td><td class="num">3 / 7</td><td class="num">0.70 (0.49&ndash;0.92)</td><td class="num">0.13</td></tr>
+  </tbody>
+</table>
+<div class="note">
+  <p>
+    <strong>The second row is the more useful one.</strong> The first
+    reproduces <a href="https://www.nature.com/articles/s41598-017-13064-1">Fedele
+    et al. 2017</a> &mdash; the study this dataset comes from &mdash; in sixty
+    seconds per patient. The second says how far this prototype still is from
+    clinical usefulness: the expert positive control clears a bar our detector
+    does not, on the same patients and the same channels, which makes that gap
+    a statement about the detector rather than about the sample size.
+  </p>
+  <p>
+    Thirteen against seven can only detect AUC&nbsp;&ge;&nbsp;0.85 at 80% power,
+    and 24 comparisons were run uncorrected &mdash; p&nbsp;=&nbsp;0.007 becomes
+    0.17 after Bonferroni. Read the p-values with the
+    <a href="https://github.com/berdakh/onset-hfo/blob/master/onset-hfo/docs/OUTCOME.md">outcome document</a>
+    open. It is a retrospective series; the randomised
+    <a href="https://www.thelancet.com/journals/laneur/article/PIIS1474-4422(22)00311-8/fulltext">HFO Trial</a>
+    did not find the benefit such series report.
+  </p>
+</div>
+
+<h3>Against expert markings</h3>
+<p>
+  The same 20 subjects, scored event by event &mdash; 41,187 marked events,
+  counted only on the channels the annotators actually reviewed:
 </p>
 <table>
   <thead><tr><th>Band</th><th>Threshold</th><th class="num">Precision</th><th class="num">Recall</th><th class="num">F1</th><th class="num">Channel-rank &rho;</th></tr></thead>
@@ -194,6 +243,8 @@ pytest -q                                             # 58 tests, offline</code>
     <tr><td>ripple</td><td>1.5 SD</td><td class="num">0.43</td><td class="num">0.48</td><td class="num">0.42</td><td class="num">0.59</td></tr>
     <tr><td>ripple</td><td>2.0 SD</td><td class="num">0.51</td><td class="num">0.38</td><td class="num">0.40</td><td class="num">0.66</td></tr>
     <tr><td>fast ripple</td><td>3.5 SD</td><td class="num">0.33</td><td class="num">0.29</td><td class="num">0.30</td><td class="num">0.59</td></tr>
+    <tr><td>fast ripple</td><td>5.0 SD</td><td class="num">0.54</td><td class="num">0.20</td><td class="num">0.26</td><td class="num">0.61</td></tr>
+    <tr><td>fast ripple</td><td>2.0 SD</td><td class="num">0.09</td><td class="num">0.53</td><td class="num">0.15</td><td class="num">0.44</td></tr>
   </tbody>
 </table>
 <div class="note">
@@ -213,6 +264,14 @@ pytest -q                                             # 58 tests, offline</code>
   operating point is 1.5&ndash;2.0 SD, and it now ships as a named preset. A
   default nobody had measured was quietly wrong for the clinically relevant
   setting; catching that is what this project is for.
+</p>
+<p>
+  The two bands also want <em>different</em> operating points, by a factor of
+  two and a half: ripples rank best at 2.0&nbsp;SD, fast ripples at
+  5.0&nbsp;SD. Running the ripple value in the fast-ripple band drops
+  precision from 0.54 to 0.09 &mdash; and erases the outcome signal in the
+  table above entirely. One threshold for both bands is a bug, not a
+  simplification.
 </p>
 <p>
   On <strong>synthetic data with known truth</strong> (three recordings, 60&nbsp;s
@@ -298,6 +357,7 @@ pytest -q                                             # 58 tests, offline</code>
   <a href="https://github.com/berdakh/onset-hfo/blob/master/onset-hfo/docs/METHODS.md">Methods</a>
   <a href="https://github.com/berdakh/onset-hfo/blob/master/onset-hfo/docs/AGENT.md">Agent</a>
   <a href="https://github.com/berdakh/onset-hfo/blob/master/onset-hfo/docs/EVALUATION.md">Evaluation</a>
+  <a href="https://github.com/berdakh/onset-hfo/blob/master/onset-hfo/docs/OUTCOME.md">Outcome study</a>
   <a href="https://github.com/berdakh/onset-hfo/blob/master/onset-hfo/docs/LIMITATIONS.md">Limitations</a>
   <a href="https://github.com/berdakh/onset-hfo/blob/master/onset-hfo/docs/GLOSSARY.md">Glossary</a>
   <a href="https://github.com/berdakh/onset-hfo/blob/master/onset-hfo/docs/ROADMAP.md">Roadmap</a>

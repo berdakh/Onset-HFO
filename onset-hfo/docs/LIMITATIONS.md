@@ -18,11 +18,13 @@ the results and is prevented from inventing them.
   high rate may simply be healthy tissue that ripples. On the real recording
   here, the top-ranked channels do **not** overlap the contacts the clinician
   named more than chance predicts (`EVALUATION.md` §6).
-* **Not validated on patients.** The detectors are now scored against expert
-  HFO markings on 20 real subjects (`docs/EVALUATION.md` §0), which is a real
-  benchmark and still not clinical validation: it measures *agreement with
-  another detector's validated output*, on 60 seconds per subject, with no
-  link to surgical outcome.
+* **Not validated on patients.** The detectors are scored against expert
+  HFO markings on 20 real subjects (`docs/EVALUATION.md` §0) and against
+  post-surgical seizure outcome in the same cohort (`docs/OUTCOME.md`).
+  Neither is clinical validation. The first measures *agreement with another
+  detector's validated output*; the second is a 20-patient retrospective
+  study on 60 seconds per patient, in which **our detector does not reach
+  significance on the metric where the expert markings do**.
 * **Not tuned.** Thresholds are the published defaults, checked for sanity on
   synthetic data and deliberately *not* fitted to it.
 
@@ -34,7 +36,11 @@ the results and is prevented from inventing them.
 | **The reference is a detector, not a census.** ds003498's markings are the original study's Morphology detector output after human validation. | Our precision against it is a floor, not a measurement: an event we find that it never proposed counts against us whether or not it is real. Reported as *agreement*, never as accuracy. |
 | **Only reviewed channels can be scored.** 6 to 65 of ~43 possible channels per subject, because the study kept the three most mesial bipolar channels in temporal-lobe cases. | Scores describe the reviewed subset. A detector could behave differently on the channels nobody read. |
 | **60 seconds per subject, one run each.** The recordings are five minutes and each subject has 10–39 runs. | Rates and rankings from one minute are noisy; the benchmark is a measurement of the method, not of the patients. |
-| **The shipped threshold is not the measured optimum.** The default stays at the literature's 5.0 SD; the data prefers 1.5–2.0 SD. | Anyone running the defaults on interictal data gets recall 0.12 and near-chance channel ranking unless they pass `--threshold interictal-agreement`. |
+| **The shipped threshold is not the measured optimum.** The default stays at the literature's 5.0 SD; ripples prefer 1.5–2.0 SD. | Anyone running the defaults on interictal ripple data gets recall 0.12 and near-chance channel ranking unless they pass `--threshold interictal-agreement`. |
+| **The two bands need different thresholds, and only `outcome` applies them automatically.** Ripples rank best at 2.0 SD, fast ripples at 5.0 SD. | Running 2.0 SD in the fast-ripple band drops precision to 0.086 and flattens the outcome signal entirely (`docs/OUTCOME.md`). `run` and `benchmark` take whatever threshold you pass, for every band. |
+| **The outcome study is 13 seizure-free against 7 recurrences.** The smallest effect these group sizes can detect at 80% power is AUC 0.85. | Every p above 0.05 in `docs/OUTCOME.md` means "underpowered", not "no effect". 24 comparisons, uncorrected; the Bonferroni column is in the table. |
+| **Resected contacts that were never recorded cannot be scored.** In five temporal-lobe subjects only 4 of 16 listed resected contacts appear in the recording. | Those patients' "share inside the resection" describes a quarter of their resection. `recordings.csv` carries `rz_coverage` per subject. |
+| **The fast-ripple detector is event-starved in 60 s.** At its measured 5.0 SD operating point, 5 of 20 subjects yield ≤1 detection and one yields none. | A per-patient statistic from a single event is not a measurement. The source study scored whole nights. |
 | **1000 Hz sampling in `ds003029`.** Nyquist is 500 Hz. | Ripples only in that dataset; the pipeline refuses to analyse fast ripples there. `ds003498` is 2000 Hz, so fast ripples *are* analysed there (F1 0.30, ρ 0.59). |
 | **One patient for the ictal demo; 20 for the benchmark.** | The quickstart's numbers describe one recording. The benchmark's describe 20 subjects from one centre, one scanner, one annotation protocol. |
 | **Small counts.** A 60 s window turns a rate into a count. | 30 events/min *is* 30 events. Confidence intervals are printed for this reason; overlapping intervals mean "tied", not "ranked". |
@@ -59,8 +65,11 @@ HFO-guided versus spike-guided tailoring, seizure freedom at one year was
 
 The retrospective evidence is friendlier — [Fedele et al. (2017)](https://www.nature.com/articles/s41598-017-13064-1),
 whose markings this repository is scored against, found that resecting HFO-
-generating tissue predicted outcome in individual patients — but a randomised
-trial outranks it.
+generating tissue predicted outcome in individual patients, and `docs/OUTCOME.md`
+reproduces that finding from their expert markings in 60 seconds per patient —
+but a randomised trial outranks a retrospective series, including this one.
+Reproducing a retrospective result is evidence that our *analysis* is sound,
+not evidence that the *clinical claim* is.
 
 What this means for anyone presenting or building on this work: the
 contribution here is **measurement quality and provenance**, not a claim that
@@ -77,10 +86,18 @@ matter most, in order:
    nothing here can be compared to the HFO literature.
 2. **Does it hold across windows and across patients?** A ranking that moves
    when you shift the window by a minute is not a finding.
-3. **Does it relate to surgical outcome?** That is the only reference standard
-   that means anything clinically, and this dataset has it (`participants.tsv`
-   has Engel and ILAE scores) — it is the first serious study this codebase
-   could support.
+3. ~~**Does it relate to surgical outcome?**~~ **Asked, and the answer is
+   instructive** (`docs/OUTCOME.md`). The expert markings reproduce the
+   published finding on this cohort — the busiest fast-ripple channel was
+   inside the resection in 12/13 seizure-free patients and 2/7 recurrences,
+   AUC 0.82, p = 0.007. Our detector points the same way and does not get
+   there (AUC 0.70, p = 0.13). The remaining question is no longer *whether
+   HFO location relates to outcome in this cohort* but **what our detector
+   is doing differently from the experts on the channels that matter** —
+   which is a concrete engineering question, not an open-ended one.
+4. **Does any of it survive a second cohort?** Nothing here has been shown
+   to generalise beyond one centre, one annotation protocol and one
+   surgical team.
 
 `ROADMAP.md` turns these into work items.
 

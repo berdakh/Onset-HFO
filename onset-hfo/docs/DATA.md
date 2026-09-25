@@ -82,10 +82,35 @@ Sarnthein J. *Resection of high frequency oscillations predicts seizure
 outcome in the individual patient.* Sci Rep 7:13836 (2017).
 doi:10.1038/s41598-017-13064-1
 
-Its `participants.tsv` also carries **surgical outcome** (ILAE class, seizure
-freedom, follow-up months, lesional status) for 19 subjects — which is the
-reference standard `docs/ROADMAP.md` wants for the outcome study, sitting in
-the archive unused.
+### The two sidecars that make an outcome study possible
+
+`participants.tsv` carries **surgical outcome** for all 20 subjects: `outcome`
+(`S` = seizure-free, 13 subjects; `F` = recurrence, 7), ILAE class 1–6,
+follow-up 10–46 months, lesional status, and whether the epilepsy was temporal
+(9) or extratemporal (11).
+
+`sourcedata/clinical_ch_sheet_zurich.xlsx` carries the **resected zone**: one
+row per subject, with `rz` as free-text contact ranges (`"ahr1-4, ar1-4,
+phr1-4"`) and `excluded` listing contacts the source study dropped because
+electrical stimulation of them evoked a motor or language response.
+`onset_hfo/clinical.py` parses both, expands the ranges to contacts, and maps
+them onto bipolar channels; `onset_hfo/outcome.py` uses them. See
+[`OUTCOME.md`](OUTCOME.md).
+
+Two things to know before relying on that sheet:
+
+* **Recorded channels are a subset of implanted contacts.** In 15 of 20
+  subjects every resected contact appears in the recording. In the other five
+  — all temporal-lobe cases, where the study kept only the three most mesial
+  bipolar channels — only 4 of 16 listed resected contacts were recorded.
+  `Resection.coverage()` reports this per subject and the outcome study writes
+  it to `recordings.csv`; do not quote a "share inside the resection" for
+  those five without it.
+* **The sheet has a typo.** Subject 15's `excluded` cell reads `1ll22-24`
+  where every other token on the row says `tll`. `expand_contact_ranges`
+  returns unparsable chunks rather than dropping them, and `resection_map`
+  prints a warning, so the three contacts are visibly unclassified instead of
+  silently missing.
 
 ## How only 24 MB gets downloaded
 
