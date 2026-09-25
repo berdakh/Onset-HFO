@@ -49,6 +49,7 @@ from onset_hfo.outcome import FULL_RUN_S, OutcomeResult, outcome_study
 
 __all__ = [
     "GROWING_WINDOWS",
+    "plot_run_stability",
     "DISJOINT_LENGTH",
     "DEFAULT_RUNS_PER_SUBJECT",
     "StabilityResult",
@@ -716,3 +717,103 @@ def across_runs(runs_per_subject: int = DEFAULT_RUNS_PER_SUBJECT,
     if verbose and len(out.groups):
         print(f"\n[onset-hfo] {out.verdict_runs()}")
     return out
+
+
+def plot_run_stability(result: StabilityResult, path: str | Path | None = None,
+                       dpi: int = 140):
+    """Three panels for the across-runs study: hold, move, and what pooling buys."""
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    from onset_hfo.viz import PALETTE, _fig
+
+    colors = {"expert": PALETTE["series_1"], result.detector: PALETTE["series_2"]}
+    metric, band = result.primary
+    fig, axes = _fig(1, 3, figsize=(13.5, 4.2))
+
+    # -- A: the answer, run by run ----------------------------------------
+    ax = axes[0]
+    per_run = result.groups.query(
+        "arm == 'run' and metric == @metric and band == @band and scope == 'reviewed'")
+    pooled = result.groups.query(
+        "arm == 'pooled' and metric == @metric and band == @band and scope == 'reviewed'")
+    for source, group in per_run.groupby("source"):
+        color = colors.get(source, PALETTE["series_3"])
+        group = group.sort_values("run")
+        x = np.arange(1, len(group) + 1)
+        ax.fill_between(x, group["auc_lo"], group["auc_hi"], color=color,
+                        alpha=0.12, linewidth=0)
+        ax.plot(x, group["auc"], "-o", color=color, label=source, markersize=4.5,
+                linewidth=1.8)
+        row = pooled[pooled["source"] == source]
+        if len(row):
+            ax.axhline(float(row.iloc[0]["auc"]), color=color, linewidth=1,
+                       linestyle="--", alpha=0.6)
+        ax.set_xticks(x)
+        ax.set_xticklabels([f"run {r}" for r in group["run"]], fontsize=8)
+    ax.axhline(0.5, color=PALETTE["ink_soft"], linewidth=1, linestyle=":")
+    ax.set_ylabel("AUC, seizure-free vs recurrence")
+    ax.set_ylim(0, 1.05)
+    ax.set_title("A  One night to the next\n     (dashed = runs pooled per patient)",
+                 fontsize=10, loc="left", color=PALETTE["ink"])
+    ax.legend(frameon=False, fontsize=9)
+
+    # -- B: how far each patient moves ------------------------------------
+    ax = axes[1]
+    decision = result.decision_stability(arm="run")
+    if len(decision):
+        sources = list(decision["source"].unique())
+        rng = np.random.default_rng(0)
+        for i, source in enumerate(sources):
+            values = decision.loc[decision["source"] == source, "spread"].to_numpy(float)
+            jitter = rng.uniform(-0.09, 0.09, len(values))
+            ax.scatter(np.full(len(values), i) + jitter, values, s=26,
+                       color=colors.get(source, PALETTE["series_3"]), alpha=0.75,
+                       edgecolors="none", label=source)
+            ax.plot([i - 0.22, i + 0.22], [np.median(values)] * 2,
+                    color=PALETTE["ink"], linewidth=1.6)
+        ax.set_xticks(range(len(sources)))
+        ax.set_xticklabels(sources, fontsize=9)
+        ax.set_ylabel(f"per-patient range of {metric}\nacross that patient's runs")
+        ax.set_ylim(-0.05, 1.05)
+        ax.set_title("B  How far one patient's answer moves\n     (0 = same every night; "
+                     "bar = median)", fontsize=10, loc="left", color=PALETTE["ink"])
+
+    # -- C: what pooling buys ---------------------------------------------
+    ax = axes[2]
+    singles = result.subjects.query("arm == 'run' and band == @band and scope == 'reviewed'")
+    pooled_subjects = result.subjects.query("arm == 'pooled' and band == @band")
+    if len(singles) and len(pooled_subjects) and "n_candidates" in singles.columns:
+        labels, positions = [], []
+        width = 0.36
+        for i, source in enumerate(sorted(singles["source"].unique())):
+            one = singles.loc[singles["source"] == source].groupby("subject")[
+                "n_candidates"].median()
+            many = pooled_subjects.loc[pooled_subjects["source"] == source].set_index(
+                "subject")["n_candidates"]
+            shared = one.index.intersection(many.index)
+            offset = (i - 0.5) * width
+            for j, value in enumerate([one.loc[shared].median(),
+                                       many.loc[shared].median()]):
+                ax.bar(j + offset, value, width=width,
+                       color=colors.get(source, PALETTE["series_3"]),
+                       label=source if j == 0 else None)
+                ax.text(j + offset, value + 0.05, f"{value:.1f}", ha="center",
+                        va="bottom", fontsize=8.5, color=PALETTE["ink_soft"])
+            labels, positions = ["one run", "runs pooled"], [0, 1]
+        ax.set_xticks(positions)
+        ax.set_xticklabels(labels, fontsize=9)
+        ax.set_ylabel("median candidate-set size")
+        ax.set_title("C  Does pooling resolve the ties?", fontsize=10, loc="left",
+                     color=PALETTE["ink"])
+        ax.legend(frameon=False, fontsize=9)
+    fig.tight_layout()
+    if path is not None:
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(path, dpi=dpi, facecolor=fig.get_facecolor())
+        plt.close(fig)
+        print(f"[onset-hfo] figure written to {path}")
+    return fig
