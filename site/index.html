@@ -158,7 +158,7 @@ footer a { color: var(--ink-2); }
   <div class="card">
     <p class="num">Notebook 5</p>
     <h3>Surgical outcome study</h3>
-    <p>The one test whose reference standard is not another algorithm: did the HFO map point at the tissue whose removal cured the patient? Reproduces a published finding &mdash; then shows our own detector missing it.</p>
+    <p>The one test whose reference standard is not another algorithm: did the HFO map point at the tissue whose removal cured the patient? Also the notebook that shows a headline result weakening when the analysis window grows &mdash; and why that matters more than the result.</p>
     <a class="btn" href="https://colab.research.google.com/github/berdakh/onset-hfo/blob/master/onset-hfo/notebooks/05_surgical_outcome_study.ipynb">Open in Colab &rarr;</a>
   </div>
 </div>
@@ -200,7 +200,7 @@ pytest -q                                             # 236 tests, offline</code
 
 <h3>Against surgical outcome</h3>
 <p>
-  Twenty patients, 60&nbsp;seconds of interictal sleep each, the resected
+  Twenty patients, the whole interictal-sleep run each (300&nbsp;s), the resected
   contacts read from the archive's clinical sheet and seizure outcome from
   <code>participants.tsv</code>. The question: was the channel generating the
   most fast ripples inside the tissue the surgeon removed?
@@ -208,28 +208,31 @@ pytest -q                                             # 236 tests, offline</code
 <table>
   <thead><tr><th>HFO source</th><th class="num">Seizure-free (n=13)</th><th class="num">Recurrence (n=7)</th><th class="num">AUC (95% CI)</th><th class="num">p</th></tr></thead>
   <tbody>
-    <tr><td><strong>Expert markings</strong></td><td class="num"><strong>12 / 13</strong></td><td class="num"><strong>2 / 7</strong></td><td class="num"><strong>0.82 (0.64&ndash;1.00)</strong></td><td class="num"><strong>0.007</strong></td></tr>
-    <tr><td>Our RMS detector</td><td class="num">10 / 12</td><td class="num">3 / 7</td><td class="num">0.70 (0.49&ndash;0.92)</td><td class="num">0.13</td></tr>
+    <tr><td>Expert markings</td><td class="num">11 / 13</td><td class="num">3 / 7</td><td class="num">0.71 (0.50&ndash;0.92)</td><td class="num">0.12</td></tr>
+    <tr><td>Our RMS detector</td><td class="num">10 / 13</td><td class="num">3 / 7</td><td class="num">0.67 (0.45&ndash;0.89)</td><td class="num">0.17</td></tr>
   </tbody>
 </table>
 <div class="note">
   <p>
-    <strong>The second row is the more useful one.</strong> The first
-    reproduces <a href="https://www.nature.com/articles/s41598-017-13064-1">Fedele
-    et al. 2017</a> &mdash; the study this dataset comes from &mdash; in sixty
-    seconds per patient. The second says how far this prototype still is from
-    clinical usefulness: the expert positive control clears a bar our detector
-    does not, on the same patients and the same channels, which makes that gap
-    a statement about the detector rather than about the sample size.
+    The direction is the one
+    <a href="https://www.nature.com/articles/s41598-017-13064-1">Fedele et al. 2017</a>
+    predicts &mdash; the study this dataset comes from &mdash; and with 13
+    patients against 7 it does not reach significance. This cohort can only
+    detect AUC&nbsp;&ge;&nbsp;0.85 at 80% power, so it could not have
+    established either number. <strong>Nothing in the study reaches
+    p&nbsp;&lt;&nbsp;0.05.</strong>
   </p>
   <p>
-    Thirteen against seven can only detect AUC&nbsp;&ge;&nbsp;0.85 at 80% power,
-    and 24 comparisons were run uncorrected &mdash; p&nbsp;=&nbsp;0.007 becomes
-    0.17 after Bonferroni. Read the p-values with the
-    <a href="https://github.com/berdakh/onset-hfo/blob/master/onset-hfo/docs/OUTCOME.md">outcome document</a>
-    open. It is a retrospective series; the randomised
-    <a href="https://www.thelancet.com/journals/laneur/article/PIIS1474-4422(22)00311-8/fulltext">HFO Trial</a>
-    did not find the benefit such series report.
+    <strong>The most useful result is that an earlier version of this table
+    said something stronger.</strong> On the first 60&nbsp;seconds of the same
+    recordings &mdash; same code, same pre-specified metric &mdash; the expert
+    arm gave AUC&nbsp;0.82, p&nbsp;=&nbsp;0.007, and that is what this page
+    claimed until the study was re-run on the full recording. Two patients
+    account for the whole difference. A conclusion that changes between minute
+    one and minutes one-to-five is not yet a measurement, and channel-ranking
+    stability across windows is now the most concrete open problem in the
+    project. Both tables, side by side, are in the
+    <a href="https://github.com/berdakh/onset-hfo/blob/master/onset-hfo/docs/OUTCOME.md">outcome document</a>.
   </p>
 </div>
 
@@ -270,8 +273,8 @@ pytest -q                                             # 236 tests, offline</code
   The two bands also want <em>different</em> operating points, by a factor of
   two and a half: ripples rank best at 2.0&nbsp;SD, fast ripples at
   5.0&nbsp;SD. Running the ripple value in the fast-ripple band drops
-  precision from 0.54 to 0.09 &mdash; and erases the outcome signal in the
-  table above entirely. One threshold for both bands is a bug, not a
+  precision from 0.54 to 0.09, and flattened the outcome arm above when it was
+  first run that way. One threshold for both bands is a bug, not a
   simplification.
 </p>
 <p>

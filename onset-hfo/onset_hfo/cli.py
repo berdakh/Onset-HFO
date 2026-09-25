@@ -31,6 +31,7 @@ from onset_hfo.config import (
     PipelineConfig,
     ensure_dirs,
 )
+from onset_hfo.outcome import FULL_RUN_S
 
 
 def _cmd_run(args: argparse.Namespace) -> int:
@@ -258,7 +259,10 @@ def build_parser() -> argparse.ArgumentParser:
     out.add_argument("--n-subjects", type=int, default=None)
     out.add_argument("--run", default="01")
     out.add_argument("--start", type=float, default=0.0)
-    out.add_argument("--stop", type=float, default=60.0)
+    out.add_argument("--stop", type=float, default=FULL_RUN_S,
+                     help="seconds of each recording to use. The default is the whole "
+                          "run; 60 gives a different answer, which is itself a result "
+                          "(see docs/OUTCOME.md)")
     out.add_argument("--detector", default="rms", choices=["rms", "line_length"])
     out.add_argument("--threshold", type=float, default=None,
                      help="one threshold for every band; default is the measured "

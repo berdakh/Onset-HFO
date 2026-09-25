@@ -106,6 +106,18 @@ __all__ = [
 
 DETECTORS = {"rms": detect_rms, "line_length": detect_line_length}
 
+#: Length of one ``ds003498`` run, in seconds. Every run in the archive is
+#: exactly this long, so this is not a slice -- it is the whole recording and
+#: every expert marking in it.
+#:
+#: It is the default because the first version of this analysis used 60 s and
+#: got a *different answer*: the expert arm reached AUC 0.82 (p = 0.007) on the
+#: first minute and 0.71 (p = 0.12) on the whole run. Two patients' busiest
+#: fast-ripple channel moved in or out of the resection when the other four
+#: minutes were included. A window short enough to change the conclusion is not
+#: a defensible default, however much faster it is.
+FULL_RUN_S = 300.0
+
 #: Operating point used for the detector arm, **per band**. Both values come
 #: from :mod:`onset_hfo.benchmark`, where they were chosen on channel-ranking
 #: agreement with the expert markings -- a question that says nothing about
@@ -336,7 +348,7 @@ def _top_channel_resected(rates: pd.Series, zones: pd.Series) -> float:
 
 
 def outcome_subject(subject: str, resection, run: str = "01",
-                    t_start: float = 0.0, t_stop: float = 60.0,
+                    t_start: float = 0.0, t_stop: float = FULL_RUN_S,
                     dataset: str = "ds003498", detector: str = "rms",
                     threshold_sd: float | dict[str, float] | None = None,
                     bands: tuple[str, ...] = ("ripple", "fast_ripple"),
@@ -442,7 +454,7 @@ class OutcomeResult:
     groups: pd.DataFrame          #: the group comparison, one row per arm
     participants: pd.DataFrame    #: outcome, ILAE, follow-up as published
     dataset: str = "ds003498"
-    window_s: tuple[float, float] = (0.0, 60.0)
+    window_s: tuple[float, float] = (0.0, FULL_RUN_S)
     detector: str = "rms"
     threshold_sd: dict = field(default_factory=lambda: dict(BAND_THRESHOLD_SD))
     power_floor: float = float("nan")
@@ -563,7 +575,7 @@ def compare_groups(subjects: pd.DataFrame, participants: pd.DataFrame,
 
 def outcome_study(subjects: list[str] | None = None, n_subjects: int | None = None,
                   dataset: str = "ds003498", run: str = "01",
-                  t_start: float = 0.0, t_stop: float = 60.0,
+                  t_start: float = 0.0, t_stop: float = FULL_RUN_S,
                   detector: str = "rms", threshold_sd: float | dict[str, float] | None = None,
                   bands: tuple[str, ...] = ("ripple", "fast_ripple"),
                   drop_eloquent: bool = True,

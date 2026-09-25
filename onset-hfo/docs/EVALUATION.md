@@ -123,12 +123,19 @@ compares the pipeline to something no algorithm produced:
 **[OUTCOME.md](OUTCOME.md)** — did the HFO map point at the tissue whose
 removal made the patient seizure-free?
 
-The short version. Expert markings, fast-ripple band: the busiest channel
-was inside the resection in 12 of 13 seizure-free patients and 2 of 7
-recurrences (AUC 0.82, p = 0.007). Our detector on the same channels: 10 of
-12 versus 3 of 7, AUC 0.70, p = 0.13. The expert positive control clears the
-bar the detector does not, on 20 patients and 60 seconds each, which makes
-that gap a statement about the detector rather than about the sample size.
+The short version, on whole 300-second runs: expert markings, fast-ripple
+band, the busiest channel was inside the resection in 11 of 13 seizure-free
+patients and 3 of 7 recurrences (AUC 0.71, p = 0.12); our detector on the same
+channels, 10 of 13 versus 3 of 7 (AUC 0.67, p = 0.17). Nothing reaches
+p < 0.05.
+
+**The number that matters is the one that moved.** On the first 60 seconds of
+the same recordings the expert arm gave AUC 0.82, p = 0.007 — and that is what
+this document and the README reported until the study was re-run on the full
+recording. Two patients account for the entire difference. A conclusion that
+changes between minute one and minutes one-to-five is not yet a measurement,
+and channel-ranking stability across windows is now the most concrete open
+problem in this repository.
 
 ```bash
 python -m onset_hfo.cli outcome

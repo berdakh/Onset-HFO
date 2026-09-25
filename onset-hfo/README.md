@@ -139,26 +139,36 @@ And, in the other direction — the agent deciding what the pipeline measures:
 ## Results you can check
 
 **Against surgical outcome** — the strongest test here, and the only one whose
-reference standard is not another algorithm. 20 patients of ds003498, 60 s of
-interictal sleep each, resected contacts from the archive's clinical sheet,
-seizure outcome from `participants.tsv`:
+reference standard is not another algorithm. 20 patients of ds003498, the whole
+interictal-sleep run each (300 s), resected contacts from the archive's
+clinical sheet, seizure outcome from `participants.tsv`. The question: *was the
+channel generating the most fast ripples inside the tissue the surgeon
+removed?*
 
-| source | metric | seizure-free (n=13) | recurrence (n=7) | AUC (95% CI) | p |
-|---|---|---|---|---|---|
-| **expert markings** | busiest fast-ripple channel was resected | **12/13** | **2/7** | **0.82 (0.64–1.00)** | **0.007** |
-| our RMS detector | same metric, same channels | 10/12 | 3/7 | 0.70 (0.49–0.92) | 0.13 |
+| source | seizure-free (n=13) | recurrence (n=7) | AUC (95% CI) | p |
+|---|---|---|---|---|
+| expert markings | 11/13 | 3/7 | 0.71 (0.50–0.92) | 0.12 |
+| our RMS detector | 10/13 | 3/7 | 0.67 (0.45–0.89) | 0.17 |
 
-The first row reproduces [Fedele et al. 2017](https://www.nature.com/articles/s41598-017-13064-1)
-— the study this dataset comes from — in 60 seconds per patient. The second
-row is the honest measure of how far this prototype is from being useful: the
-expert positive control clears a bar our detector does not, on the same
-patients and the same channels, which makes that gap a statement about the
-detector rather than about the sample size. 13 vs 7 can only detect AUC ≥ 0.85
-at 80% power, and 24 comparisons were run uncorrected — read the p-values with
-[`docs/OUTCOME.md`](docs/OUTCOME.md) open.
+The direction is the one [Fedele et al. 2017](https://www.nature.com/articles/s41598-017-13064-1)
+predicts — the study this dataset comes from — and with 13 patients against 7
+it does not reach significance. `min_detectable_auc(13, 7)` is **0.85**, so
+this cohort could not have established either number. Nothing in the study
+reaches p < 0.05.
+
+**The most useful result is that an earlier version of this table said
+something stronger.** On the first 60 seconds of the same recordings, the same
+code and the same pre-specified metric, the expert arm gave AUC **0.82,
+p = 0.007** — and that is what this README claimed until the study was re-run
+on the full recording. Two patients account for the whole difference. A
+conclusion that changes between minute one and minutes one-to-five is not yet
+a measurement, and channel-ranking stability across windows is now the most
+concrete open problem in this repository. The full accounting, both tables side
+by side, is in [`docs/OUTCOME.md`](docs/OUTCOME.md).
 
 ```bash
-python -m onset_hfo.cli outcome
+python -m onset_hfo.cli outcome            # whole runs, ~2.2 GB, ~25 minutes
+python -m onset_hfo.cli outcome --stop 60  # the first minute: a different answer
 ```
 
 **Against expert HFO markings** — 20 subjects of [ds003498](https://openneuro.org/datasets/ds003498)

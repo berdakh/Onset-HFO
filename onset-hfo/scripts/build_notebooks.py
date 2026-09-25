@@ -1296,12 +1296,15 @@ expert HFO markings per channel, the **resected contacts** for each patient,
 and whether that patient became **seizure-free**. Almost no public iEEG
 dataset carries all three.
 
-**What you will do.** Reproduce a published finding from 60 seconds of
-recording per patient, then watch our own detector fail to reach it — which is
-the more useful of the two results, because it says precisely what to fix.
+**What you will do.** Test a published finding on whole recordings, watch our
+own detector land close behind the expert markings, and then see the same
+analysis on the first 60 seconds give a *stronger* answer than the full five
+minutes — which is the most useful result in the notebook, because it says the
+number is not stable yet.
 
-**Runtime.** About 25 minutes on a free Colab instance, most of it downloading
-20 x ~24 MB slices. Everything is cached, so a second run is compute-only.
+**Runtime.** About 45 minutes on a free Colab instance, most of it downloading
+~2.2 GB (every run is exactly 300 s, so this is the whole recording and every
+expert marking in it). Everything is cached, so a second run is compute-only.
 """),
     code(SETUP),
     md("""
@@ -1391,7 +1394,7 @@ Four choices, each of which can only make the result *worse*:
 
 | Choice | Why |
 |---|---|
-| **An expert positive control** | Every number is computed twice — from the published expert markings and from our detector, on the same channels. Without it, a null is unreadable: it could be the detector or it could be 60 seconds and 20 patients. |
+| **An expert positive control** | Every number is computed twice — from the published expert markings and from our detector, on the same channels. Without it, a null is unreadable: it could be the detector or it could be 20 patients. Section 7 shows this control earning its keep. |
 | **Operating points fixed in advance** | 2.0 SD for ripples, 5.0 SD for fast ripples, both chosen in `benchmark.py` on *channel-rank agreement with the experts* — a question that says nothing about surgery. Tuning a threshold against outcome and then reporting the outcome would be circular. |
 | **Margin channels not claimed** | as above. |
 | **Both channel scopes reported** | `reviewed` (what the annotators marked) and `all` (what a deployed tool would face). Reporting only the flattering one is a choice made after seeing both. |
@@ -1401,7 +1404,8 @@ Four choices, each of which can only make the result *worse*:
     code("""
 from onset_hfo.outcome import outcome_study
 
-result = outcome_study(verbose=True)   # ~20 minutes cold, ~4 minutes cached
+# The default window is the whole run (300 s). ~2.2 GB cold, ~25 minutes cached.
+result = outcome_study(verbose=True)
 result.save()
 """),
     md("""
@@ -1421,19 +1425,20 @@ print(result.summary("share_in_rz")
 """),
     md("""
 Read the `expert` / `fast_ripple` row of the first table first. The busiest
-fast-ripple channel was inside the resection in **12 of 13** patients who
-became seizure-free and **2 of 7** whose seizures returned — AUC 0.82,
-permutation p = 0.007. That is the published claim of Fedele et al. 2017, the
-study this dataset comes from, reproduced from one minute of recording per
-patient.
+fast-ripple channel was inside the resection in **11 of 13** patients who
+became seizure-free and **3 of 7** whose seizures returned — AUC 0.71,
+permutation p = 0.12. The direction is the one Fedele et al. 2017 predicts, and
+with 13 patients against 7 it does not reach significance. Nothing in this
+study does.
 
-Then read the same row of the second table: `share_in_rz` shows **nothing**,
-in the expert arm, on the same events. **Concentration localises; proportion
-does not.** "Most of this patient's HFOs were inside the resection" is largely
-a statement about how big the resection was. "The one place generating the
-most fast ripples was removed" is the clinically useful sentence — and it
-means any report built on this pipeline should show a *ranking*, not a
-percentage.
+Then read the same row of the second table: `share_in_rz` shows **nothing** in
+the expert arm — AUC 0.48, a coin flip — on the same events. **Concentration
+localises; proportion does not.** "Most of this patient's HFOs were inside the
+resection" is largely a statement about how big the resection was. "The one
+place generating the most fast ripples was removed" is the clinically useful
+sentence — and it means any report built on this pipeline should show a
+*ranking*, not a percentage. This is the one conclusion in the notebook that
+holds at every window length.
 
 ## 6. Where our detector stands
 """),
@@ -1452,30 +1457,71 @@ print(view[["subject", "outcome", "source", "n_events",
       .sort_values(["outcome", "subject", "source"]).to_string(index=False))
 """),
     md("""
-Two things are visible in that table and in nothing else.
+**Our detector lands just behind the expert markings** — 10 of 13 versus 3 of
+7, AUC 0.67 against their 0.71, with intervals that overlap almost entirely.
+Both are null. Over 300 s every subject produces fast-ripple detections, so
+unlike the 60-second version of this analysis no patient drops out.
 
-**Our detector points the same way and does not get there** — 10 of 12 versus
-3 of 7, AUC 0.70, p = 0.13. This is the one configuration in the whole design
-that is evidence against *the detector* rather than against the sample size:
-the expert positive control cleared the bar on the same patients and the same
-channels. That gap is the most useful number in the repository, because it is
-a specific engineering target rather than a vague "needs more validation".
+Keep that 0.67-against-0.71 in mind for the next section, because on the first
+minute of the same recordings the two numbers were 0.70 and **0.82**.
 
-**It is also event-starved.** At 5.0 SD in a 60-second window, five of twenty
-subjects yield one or zero fast-ripple detections, and `sub-10` yields none
-and drops out of that arm entirely (which is why its `n_seizure_free` reads 12,
-not 13). A per-patient statistic computed from a single event is not a
-measurement. The source study scored whole nights.
+## 7. The window changes the answer
 
-## 7. Why the band matters, demonstrated
-
-The first version of this analysis used 2.0 SD in **both** bands, because that
-is what the ripple benchmark prefers. Here is what that does in the fast-ripple
-band:
+This is the most important cell in the notebook. Same code, same pre-specified
+metric, same patients — only the analysis window differs.
 """),
     code("""
-wrong = outcome_study(subjects=[f"sub-{i:02d}" for i in range(1, 21)],
-                      threshold_sd=2.0,         # one threshold everywhere
+short = outcome_study(t_stop=60.0, bands=("fast_ripple",), verbose=False)
+for label, res in [("first 60 s", short), ("whole 300 s", result)]:
+    row = res.summary("top_channel_resected").query(
+        "scope == 'reviewed' and band == 'fast_ripple'")
+    print(f"--- {label} ---")
+    print(row[["source", "mean_seizure_free", "mean_recurrence",
+               "auc", "auc_lo", "auc_hi", "p_permutation"]].to_string(index=False))
+"""),
+    code("""
+# Which patients moved, and in which direction?
+key = ["subject", "source"]
+q = "band == 'fast_ripple' and scope == 'reviewed'"
+moved = (short.subjects.query(q)[key + ["n_events", "top_channel_resected"]]
+         .merge(result.subjects.query(q)[key + ["n_events", "top_channel_resected"]],
+                on=key, suffixes=("_60", "_300"))
+         .merge(result.participants[["subject", "outcome"]], on="subject"))
+print(moved[moved["top_channel_resected_60"] != moved["top_channel_resected_300"]]
+      .to_string(index=False))
+"""),
+    md("""
+**Five times the data, a weaker result.** The expert arm falls from AUC 0.82
+(p = 0.007) to 0.71 (p = 0.12); ours barely moves, 0.70 to 0.67. Two patients
+account for all of it: `sub-18` (a recurrence whose busiest channel turns out
+to be *inside* the resection once you look past the first minute — a flip that
+costs twice) and `sub-15` (a seizure-free patient going the other way).
+
+Three things follow, and they are why this notebook exists:
+
+- **The 60-second number should never have been the headline**, and it was:
+  the project's README and landing page carried AUC 0.82, p = 0.007 until this
+  was run. 60 s was chosen for download size before any outcome data was
+  touched, and the metric and band were pre-specified — so this is not
+  cherry-picking. It is something worse and more common: an analysis window
+  short enough to change the conclusion, never checked.
+- **"Which channel is busiest" is fragile.** It is an argmax over 6–65 channels
+  whose Poisson rate intervals overlap. `metrics.py` already refuses to rank
+  channels whose intervals overlap when it reports rates; this metric does not,
+  and it should.
+- **The positive control earned its place** — just not in the way it was
+  designed to. It was built to tell "our detector is worse" apart from "this
+  study is underpowered". The 60-second run looked like the first. The full run
+  says the second.
+
+## 8. Why the band matters, demonstrated
+
+One more parameter that decides whether there is a signal at all. The first
+version of this analysis used 2.0 SD in **both** bands, because that is what
+the ripple benchmark prefers. Here is what that does in the fast-ripple band:
+"""),
+    code("""
+wrong = outcome_study(threshold_sd=2.0,   # one threshold everywhere
                       bands=("fast_ripple",), verbose=False)
 print("2.0 SD in both bands:")
 print(wrong.summary("top_channel_resected").query("scope == 'reviewed'").to_string(index=False))
@@ -1485,24 +1531,24 @@ print(result.summary("top_channel_resected")
 """),
     md("""
 At 2.0 SD the fast-ripple detector runs at precision 0.086 — a mean of 1,142
-detections per 60 s against a mean of 228 expert-marked events — and the
-outcome signal disappears. Nothing about the outcome data was used to choose
-either threshold; both come from channel-rank agreement with the experts, in
+detections per 60 s against a mean of 228 expert-marked events. Nothing about
+the outcome data was used to choose either threshold; both come from
+channel-rank agreement with the experts, in
 `notebooks/03_validation_and_benchmark.ipynb`. **One threshold for both bands
 is a bug, not a simplification.**
 
-## 8. Read this before quoting any of it
+## 9. Read this before quoting any of it
 
 - **Thirteen versus seven is a very small study.** `min_detectable_auc(13, 7)`
   returns **0.85** — with these group sizes only a very large separation
   reaches 80% power. A p above 0.05 here means *underpowered*, not *no effect*.
-- **Twenty-four comparisons, uncorrected.** The Bonferroni column is in
-  `groups.csv`; p = 0.007 becomes p = 0.17 across the table. The expert
-  fast-ripple row is worth reporting because it is a *pre-specified
-  replication* of the paper the dataset accompanies, not because it survived a
-  search.
-- **Sixty seconds of one night**, against several whole nights in the source
-  study. Try `outcome_study(t_stop=300)`.
+- **Nothing in the full-run study reaches p < 0.05**, and the Bonferroni column
+  in `groups.csv` corrects across 24 comparisons. Read every row as
+  hypothesis-generating.
+- **One full run of one night**, against several whole nights in the source
+  study. The archive has 1–6 runs per subject; combining them is the obvious
+  extension, and given §7 it should happen before any number here is called
+  stable.
 - **Retrospective, one centre, one surgical team.** The
   [HFO Trial](https://www.thelancet.com/journals/laneur/article/PIIS1474-4422(22)00311-8/fulltext)
   (Lancet Neurology 2022) tested HFO-guided resection prospectively and did not
