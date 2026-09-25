@@ -101,7 +101,7 @@ footer a { color: var(--ink-2); }
   <div class="linkrow">
     <a href="https://berdakh.github.io/onset/tutorial.html">Start with the tutorial</a>
     <a href="https://github.com/berdakh/onset-hfo">Code on GitHub</a>
-    <a href="https://openneuro.org/datasets/ds003029">The dataset (CC0)</a>
+    <a href="https://openneuro.org/datasets/ds003498">The dataset (CC0)</a>
     <a href="https://berdakh.github.io/onset/">The Onset project</a>
   </div>
 </header>
@@ -171,7 +171,8 @@ pip install -e ".[dev]"
 python -m onset_hfo.cli run --synthetic --figures     # offline, ~10 seconds
 python -m onset_hfo.cli run --subject sub-pt01 --start 50 --stop 110
 python -m onset_agent.cli --results artifacts/results/sub-pt01_ictal_run-01 --demo
-pytest -q                                             # 58 tests, offline</code></pre>
+python -m onset_hfo.cli outcome                       # the outcome study
+pytest -q                                             # 236 tests, offline</code></pre>
 
 <h2>What one detection looks like</h2>
 <p>
@@ -188,7 +189,7 @@ pytest -q                                             # 58 tests, offline</code>
 
 <h2>How it works</h2>
 <ul class="tight">
-  <li><strong>Data.</strong> OpenNeuro <code>ds003029</code> — CC0, multicentre iEEG with clinician seizure markers. The loader asks the archive for a byte range, so a notebook downloads 24&nbsp;MB instead of 105&nbsp;MB.</li>
+  <li><strong>Data.</strong> Two public CC0 archives. <code>ds003029</code> — multicentre iEEG with clinician seizure markers, used for the ictal quickstart. <code>ds003498</code> — Zurich interictal sleep at 2000&nbsp;Hz, which ships expert HFO markings, the resected contacts and surgical outcome, and is what every measured number above rests on. The loader asks each archive for a byte range, so a notebook downloads 24&nbsp;MB instead of 105&nbsp;MB.</li>
   <li><strong>Preprocessing.</strong> 1&nbsp;Hz high-pass, narrow mains notches (the 180 and 240&nbsp;Hz harmonics sit inside the ripple band), bipolar montage.</li>
   <li><strong>Two HFO detectors</strong> that differ <em>only</em> in the feature they threshold — RMS energy (Staba 2002) and line length (Gardner 2007) — so a disagreement between them is attributable to the feature, not to two implementations drifting apart. Plus an interictal-discharge detector.</li>
   <li><strong>Artifact rejection</strong> on each event's spectrum. This is where filter ringing is removed, and it is what the precision below rests on.</li>
@@ -379,9 +380,13 @@ pytest -q                                             # 58 tests, offline</code>
     physiological ripples occur in healthy tissue.
   </p>
   <p>
-    Precision and recall here come from a simulator. The public recording has no HFO
-    labels. It is ictal data from one patient, one minute, at 1000&nbsp;Hz — so ripples
-    can be analysed and fast ripples cannot. The
+    The detector numbers above are <strong>agreement with another detector's
+    validated output</strong>, not accuracy, on 60&nbsp;seconds per patient from
+    one centre. The outcome study is a <strong>retrospective series of twenty
+    patients</strong> — 13 against 7 — which can only detect a very large
+    effect, and whose 24 comparisons are uncorrected. Reproducing a
+    retrospective finding is evidence that the analysis is sound, not that the
+    clinical claim is. The
     <a href="https://github.com/berdakh/onset-hfo/blob/master/onset-hfo/docs/LIMITATIONS.md">full list</a>
     should be read before quoting any number on this page to anyone.
   </p>
@@ -398,6 +403,15 @@ pytest -q                                             # 58 tests, offline</code>
     OpenNeuro (2021), CC0 — doi:10.18112/openneuro.ds003029.v1.0.3. Work using it is
     asked to cite <em>Neural fragility as an EEG marker of the seizure onset zone</em>
     (doi:10.1101/862797).
+  </p>
+  <p>
+    Expert HFO markings, resected contacts and surgical outcome:
+    <a href="https://openneuro.org/datasets/ds003498">ds003498</a>, OpenNeuro, CC0 —
+    doi:10.18112/openneuro.ds003498.v1.0.1. Fedele T, Burnos S, Boran E,
+    Krayenbühl N, Hilfiker P, Grunwald T, Sarnthein J.
+    <em>Resection of high frequency oscillations predicts seizure outcome in the
+    individual patient.</em> Sci Rep 7:13836 (2017) —
+    doi:10.1038/s41598-017-13064-1. BIDS conversion by A. Li (mne-hfo).
   </p>
 </footer>
 
