@@ -289,11 +289,16 @@ def build_report(*, provenance: dict, rates: dict[str, pd.DataFrame], comparison
         f"configuration: {json.dumps(config, default=str)}",
     ]
 
+    has_markings = bool(provenance.get("n_expert_events"))
     limitations = [
-        "prototype: thresholds were chosen from the literature and checked on synthetic data, "
-        "not tuned or validated on a labelled clinical cohort",
-        "no HFO ground truth exists for this public recording, so precision and recall are not "
-        "reported here; they are measured on synthetic data in docs/EVALUATION.md",
+        "prototype: thresholds come from the literature, checked on synthetic data and "
+        "against expert markings on 20 subjects of ds003498; not validated on a clinical cohort",
+        ("this recording carries expert HFO markings, so the detectors can be scored on it "
+         "(python -m onset_hfo.cli benchmark); agreement with those markings is not accuracy, "
+         "because the reference is another detector's validated output"
+         if has_markings else
+         "this recording carries no HFO markings, so precision and recall cannot be computed "
+         "on it; they are measured on ds003498 and on synthetic data -- see docs/EVALUATION.md"),
         "event rate is not a diagnosis: physiological ripples occur in healthy tissue, "
         "particularly in mesial temporal and occipital regions",
         "a single short window of a single patient; nothing here generalises",

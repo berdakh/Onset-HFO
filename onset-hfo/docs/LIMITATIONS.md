@@ -18,9 +18,11 @@ the results and is prevented from inventing them.
   high rate may simply be healthy tissue that ripples. On the real recording
   here, the top-ranked channels do **not** overlap the contacts the clinician
   named more than chance predicts (`EVALUATION.md` §6).
-* **Not validated on patients.** Precision and recall come from a simulator.
-  There is no labelled clinical benchmark in this repository, and no outcome
-  data.
+* **Not validated on patients.** The detectors are now scored against expert
+  HFO markings on 20 real subjects (`docs/EVALUATION.md` §0), which is a real
+  benchmark and still not clinical validation: it measures *agreement with
+  another detector's validated output*, on 60 seconds per subject, with no
+  link to surgical outcome.
 * **Not tuned.** Thresholds are the published defaults, checked for sanity on
   synthetic data and deliberately *not* fitted to it.
 
@@ -28,9 +30,13 @@ the results and is prevented from inventing them.
 
 | Limitation | Consequence |
 |---|---|
-| **Ictal data only.** The archive publishes recordings around seizures. Clinical HFO work uses interictal data, often in slow-wave sleep. | What is measured here is "where the ripple band is loudest during this seizure", not the interictal HFO rate that the literature associates with epileptogenic tissue. |
-| **1000 Hz sampling.** Nyquist is 500 Hz. | Ripples (80–250 Hz) only. Fast ripples (250–500 Hz) — which some studies find more specific — cannot be analysed. The pipeline refuses to try. |
-| **One patient, one minute.** | Nothing generalises. A different minute of the same recording may rank channels differently; check it, the code makes that easy. |
+| ~~**Ictal data only.**~~ **Resolved.** `ds003498` provides interictal slow-wave sleep at 2000 Hz with expert markings, and the benchmark runs on it. | The ictal quickstart still measures "where the ripple band is loudest during this seizure", which is not the interictal HFO rate. Use the interictal dataset for anything resembling a clinical claim. |
+| **The reference is a detector, not a census.** ds003498's markings are the original study's Morphology detector output after human validation. | Our precision against it is a floor, not a measurement: an event we find that it never proposed counts against us whether or not it is real. Reported as *agreement*, never as accuracy. |
+| **Only reviewed channels can be scored.** 6 to 65 of ~43 possible channels per subject, because the study kept the three most mesial bipolar channels in temporal-lobe cases. | Scores describe the reviewed subset. A detector could behave differently on the channels nobody read. |
+| **60 seconds per subject, one run each.** The recordings are five minutes and each subject has 10–39 runs. | Rates and rankings from one minute are noisy; the benchmark is a measurement of the method, not of the patients. |
+| **The shipped threshold is not the measured optimum.** The default stays at the literature's 5.0 SD; the data prefers 1.5–2.0 SD. | Anyone running the defaults on interictal data gets recall 0.12 and near-chance channel ranking unless they pass `--threshold interictal-agreement`. |
+| **1000 Hz sampling in `ds003029`.** Nyquist is 500 Hz. | Ripples only in that dataset; the pipeline refuses to analyse fast ripples there. `ds003498` is 2000 Hz, so fast ripples *are* analysed there (F1 0.30, ρ 0.59). |
+| **One patient for the ictal demo; 20 for the benchmark.** | The quickstart's numbers describe one recording. The benchmark's describe 20 subjects from one centre, one scanner, one annotation protocol. |
 | **Small counts.** A 60 s window turns a rate into a count. | 30 events/min *is* 30 events. Confidence intervals are printed for this reason; overlapping intervals mean "tied", not "ranked". |
 | **Bipolar pairs by contact number.** On a grid the numbering wraps at the end of a row. | `G8-G9` may be two contacts on opposite edges of the grid. Depth electrodes and strips are fine. Fixing this needs electrode coordinates (roadmap). |
 | **No physiological-ripple discrimination.** | The pipeline cannot tell an epileptic ripple from a normal one. Nothing in it tries. |
@@ -41,6 +47,26 @@ the results and is prevented from inventing them.
 | **Absolute amplitudes are only as good as the file header.** The archive declares 1 nV per stored unit; the resulting background is ~120 µV RMS, plausible but high. | Microvolt values in a report are not calibrated measurements. Detection is unaffected — all thresholds are in robust SDs of the channel itself. |
 | **No security model.** No authentication, no audit log, no protection of the results directory. | Anyone who can write to `artifacts/results/` controls what the agent believes. Do not expose this to untrusted users. |
 | **No privacy controls.** | The public data is already de-identified. If you point this at your own recordings, de-identification, ethics approval and data governance are entirely your responsibility — see `DATA.md`. |
+
+## The evidence for HFOs themselves is contested
+
+This software detects HFOs well enough to agree moderately with experts. That
+says nothing about whether HFOs should guide surgery, and the best available
+evidence is not encouraging: in [the HFO Trial](https://www.thelancet.com/journals/laneur/article/PIIS1474-4422(22)00311-8/fulltext)
+(Lancet Neurology, 2022), 78 patients randomised to intraoperative
+HFO-guided versus spike-guided tailoring, seizure freedom at one year was
+**67% with HFO guidance against 90% with spikes** — non-inferiority not met.
+
+The retrospective evidence is friendlier — [Fedele et al. (2017)](https://www.nature.com/articles/s41598-017-13064-1),
+whose markings this repository is scored against, found that resecting HFO-
+generating tissue predicted outcome in individual patients — but a randomised
+trial outranks it.
+
+What this means for anyone presenting or building on this work: the
+contribution here is **measurement quality and provenance**, not a claim that
+HFO rate identifies epileptogenic tissue. The pipeline detects interictal
+discharges as well, and the trial above suggests spikes deserve at least
+equal billing.
 
 ## Things that would change the conclusions
 

@@ -321,7 +321,8 @@ Markdown(result.report.to_markdown())
     md("""
 ## 8. A weak reality check
 
-We have no HFO ground truth for this recording. What we do have is the list of
+This ictal recording has no HFO markings. (The interictal dataset does --
+see notebook 3 and `onset-hfo benchmark`.) What we have here is the list of
 contacts the clinician named in the seizure markers. Are our top-ranked
 channels drawn from them more often than chance?
 

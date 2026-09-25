@@ -1,14 +1,18 @@
 """Measuring a detector against known truth.
 
-On the public recording there is no HFO ground truth -- nobody has marked
-every ripple in it -- so there precision and recall cannot be computed, and
-this package refuses to print numbers that look like them. What can be
-measured there is rate, ranking, agreement between detectors, and change over
-time.
+Truth comes from two places, and they support different claims.
 
 On the **synthetic** recording (:mod:`onset_hfo.synthetic`) every implanted
-event is known, so the same detectors can be scored properly. That is the
-purpose of this module, and the reason the simulator exists.
+event is known by construction, so precision and recall here mean *accuracy*.
+
+On **ds003498** the events were marked by the authors of the original study,
+so the same arithmetic means *agreement with a reference detector that a human
+validated* -- a weaker claim and a more useful one. :mod:`onset_hfo.benchmark`
+runs that comparison across the cohort.
+
+On a recording with neither (the ictal dataset), neither can be computed, and
+this package refuses to print numbers that look like them: what is measurable
+there is rate, ranking, detector agreement and change over time.
 
 Definitions used here
 ---------------------

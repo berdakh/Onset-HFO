@@ -346,6 +346,35 @@ class PipelineConfig:
         }
 
 
+# --------------------------------------------------------------------------
+# Measured operating points
+# --------------------------------------------------------------------------
+
+#: Detection thresholds, in robust SDs, with what each one is for.
+#:
+#: The shipped default (5.0) is Staba's published value and stays the default
+#: because it is what a reviewer expects and what the ictal pipeline was built
+#: with. But it is now *measured* rather than assumed, and on interictal data
+#: it is a poor choice: scored against expert HFO markings on 20 subjects of
+#: ds003498, 5.0 SD reaches recall 0.12 and ranks channels at Spearman 0.37,
+#: against recall 0.38 and 0.66 at 2.0 SD. See ``docs/EVALUATION.md``.
+#:
+#: Use these by name rather than copying numbers around:
+#:
+#:     cfg = PipelineConfig()
+#:     cfg.rms.threshold_sd = THRESHOLDS["interictal-agreement"]
+THRESHOLDS: dict[str, float] = {
+    # Staba et al. 2002, and this package's default.
+    "literature": 5.0,
+    # Highest agreement with expert channel ranking on ds003498 (rho 0.655).
+    # Channel ranking is the clinically meaningful comparison: nobody operates
+    # on an event, they operate on tissue.
+    "interictal-agreement": 2.0,
+    # Highest event-level F1 on the same cohort (0.418). Finds more events and
+    # is wrong more often; prefer it when recall matters more than precision.
+    "interictal-recall": 1.5,
+}
+
 #: Version string stamped into every result table and report, so that a number
 #: someone quotes months from now can be traced back to the code that made it.
 PIPELINE_VERSION = "0.1.0"

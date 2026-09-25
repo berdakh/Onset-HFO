@@ -27,6 +27,7 @@ from onset_hfo.config import (
     DEFAULT_TSTOP,
     PIPELINE_VERSION,
     RESULTS_DIR,
+    THRESHOLDS,
     PipelineConfig,
     ensure_dirs,
 )
@@ -46,6 +47,18 @@ def _cmd_run(args: argparse.Namespace) -> int:
 
     cfg = PipelineConfig()
     cfg.top_k = args.top_k
+    if args.threshold:
+        value = THRESHOLDS.get(args.threshold)
+        if value is None:
+            try:
+                value = float(args.threshold)
+            except ValueError:
+                print(f"[onset-hfo] --threshold must be a number or one of: "
+                      f"{', '.join(THRESHOLDS)}")
+                return 2
+        cfg.rms.threshold_sd = value
+        cfg.line_length.threshold_sd = value
+        print(f"[onset-hfo] detection threshold {value:g} SD ({args.threshold})")
     result = run_pipeline(recording, cfg, with_spikes=not args.no_spikes,
                           save_to=args.out or RESULTS_DIR)
     out_dir = Path(args.out or RESULTS_DIR) / \
@@ -169,6 +182,9 @@ def build_parser() -> argparse.ArgumentParser:
                      help="length of the synthetic recording, seconds")
     run.add_argument("--seed", type=int, default=7, help="synthetic recording seed")
     run.add_argument("--top-k", type=int, default=5)
+    run.add_argument("--threshold", default=None, metavar="SD|PRESET",
+                     help="detection threshold in robust SDs, or a measured preset: "
+                          + ", ".join(f"{k} ({v:g})" for k, v in THRESHOLDS.items()))
     run.add_argument("--no-spikes", action="store_true", help="skip the discharge detector")
     run.add_argument("--figures", action="store_true", help="also render the standard figures")
     run.add_argument("--out", default=None, help=f"output directory (default: {RESULTS_DIR})")
