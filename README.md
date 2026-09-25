@@ -28,27 +28,3 @@ Part of the [Onset](https://berdakh.github.io/onset/) project —
 Brain–Machine Interfaces Lab, Nazarbayev University. MIT licence.
 Full documentation in [`onset-hfo/docs/`](onset-hfo/docs/), including
 [what this must not be used for](onset-hfo/docs/LIMITATIONS.md).
-
----
-
-## About the earlier contents of this repository
-
-This repository previously held **BCI-GAN**, an investigation into using GANs
-(DCGAN, WGAN-GP, VAE) to augment EEG-ERP data. Those files were removed from
-the working tree; **nothing is lost** — they remain in the git history and can
-be restored at any time:
-
-```bash
-# see them
-git show 38331a8 --stat -- '*.py'
-
-# restore one, or all of them
-git checkout 38331a8 -- dcgan.py
-git checkout 38331a8 -- cnn.py data_import.py dcgan.py gan_test.py vae.py \
-    wgan_gp.py train_gan_test.py train_subject_independent.py \
-    train_subject_specific.py train_without_gans.py
-```
-
-Commit `38331a8` is the last one in which they are present. Their original
-usage was `python train_subject_specific.py --gan_type {dcgan, wgan_gp, vae}`
-and the equivalent `train_subject_independent.py` / `train_gan_test.py`.
