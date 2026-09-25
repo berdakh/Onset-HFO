@@ -114,6 +114,79 @@ def test_silent_recording_gives_nan_not_zero():
     assert np.isnan(_top_channel_resected(rates, zones))
 
 
+# -- refusing to pick a winner the data did not pick -----------------------
+
+def test_a_clear_leader_gives_a_set_of_one():
+    """When the leader's interval clears the field, nothing changes."""
+    from onset_hfo.outcome import candidate_channels
+
+    counts = pd.Series({"A": 300.0, "B": 20.0, "C": 5.0})
+    assert candidate_channels(counts, duration_min=5.0) == ["A"]
+
+
+def test_overlapping_intervals_all_join_the_candidate_set():
+    """Three channels within noise of each other are three candidates."""
+    from onset_hfo.outcome import candidate_channels
+
+    counts = pd.Series({"A": 30.0, "B": 28.0, "C": 25.0, "D": 3.0})
+    assert candidate_channels(counts, duration_min=5.0) == ["A", "B", "C"]
+
+
+def test_the_set_tightens_as_the_window_grows():
+    """The rule is an interval, not a constant, so more data narrows it.
+
+    Same rates, five times the recording: the Poisson intervals shrink and
+    channels that were tied separate. This is why no threshold needed tuning.
+    """
+    from onset_hfo.outcome import candidate_channels
+
+    short = pd.Series({"A": 30.0, "B": 20.0, "C": 3.0})
+    long = pd.Series({"A": 150.0, "B": 100.0, "C": 15.0})
+    assert candidate_channels(short, 5.0) == ["A", "B"]     # cannot be separated
+    assert candidate_channels(long, 25.0) == ["A"]          # five times the data can
+
+
+def test_candidates_reduce_to_the_argmax_when_the_set_is_one():
+    """A strict generalisation: identical answer whenever the leader is alone."""
+    from onset_hfo.outcome import _candidate_metrics
+
+    rates = pd.Series({"A": 300.0, "B": 20.0})
+    zones = pd.Series({"A": "resected", "B": "spared"})
+    out = _candidate_metrics(rates, zones, duration_min=5.0)
+    assert out["n_candidates"] == 1
+    assert out["candidates_resected"] == _top_channel_resected(rates, zones)
+    assert out["leader_alone"] == 1.0
+
+
+def test_a_tied_set_reports_a_fraction_not_a_winner():
+    from onset_hfo.outcome import _candidate_metrics
+
+    rates = pd.Series({"A": 30.0, "B": 28.0, "C": 25.0})
+    zones = pd.Series({"A": "resected", "B": "spared", "C": "resected"})
+    out = _candidate_metrics(rates, zones, duration_min=5.0)
+    assert out["n_candidates"] == 3
+    assert out["candidates_resected"] == pytest.approx(2 / 3)
+    assert out["candidates_all_resected"] == 0.0
+    assert out["leader_alone"] == 0.0
+
+
+def test_a_silent_recording_has_no_candidates():
+    from onset_hfo.outcome import _candidate_metrics, candidate_channels
+
+    rates = pd.Series({"A": 0.0, "B": 0.0})
+    zones = pd.Series({"A": "resected", "B": "spared"})
+    assert candidate_channels(rates, 5.0) == []
+    assert np.isnan(_candidate_metrics(rates, zones, 5.0)["candidates_resected"])
+
+
+def test_the_candidate_set_does_not_depend_on_channel_order():
+    """Otherwise the metric would move when the montage is built differently."""
+    from onset_hfo.outcome import candidate_channels
+
+    counts = pd.Series({"A": 30.0, "B": 30.0, "C": 3.0})
+    assert candidate_channels(counts, 5.0) == candidate_channels(counts[::-1], 5.0)
+
+
 def test_top_k_area_is_a_fraction_of_the_busiest_channels():
     """The "HFO area" version: how much of the top-3 did the surgeon take?"""
     rates = pd.Series({"A": 9.0, "B": 8.0, "C": 7.0, "D": 1.0})
@@ -224,6 +297,8 @@ def test_compare_groups_splits_on_published_outcome():
         "share_in_rz_incl_partial": [0.9, 0.8, 0.1, 0.2],
         "top_channel_resected": [1.0, 1.0, 0.0, 0.0],
         "top3_resected": [1.0, 0.667, 0.0, 0.333],
+        "candidates_resected": [1.0, 1.0, 0.0, 0.5],
+        "candidates_all_resected": [1.0, 1.0, 0.0, 0.0],
     })
     participants = pd.DataFrame({"subject": ["sub-01", "sub-02", "sub-03", "sub-04"],
                                  "outcome": ["S", "S", "F", "F"]})

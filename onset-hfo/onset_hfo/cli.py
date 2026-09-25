@@ -162,9 +162,19 @@ def _cmd_outcome(args: argparse.Namespace) -> int:
     if not len(result.subjects):
         print("[onset-hfo] nothing measured: no subject had both a resected zone and a recording")
         return 1
-    for metric in ("share_in_rz", "top_channel_resected", "top3_resected"):
+    for metric in ("share_in_rz", "top_channel_resected", "candidates_resected",
+                   "top3_resected"):
         print(f"\n[onset-hfo] {metric}, seizure-free vs recurrence:")
         print(result.summary(metric).to_string(index=False))
+    decided = result.subjects.query("scope == 'reviewed'")
+    if "leader_alone" in decided.columns and len(decided):
+        print("\n[onset-hfo] how often did the data actually pick ONE channel?")
+        table = (decided.groupby(["source", "band"])
+                 .agg(patients=("leader_alone", "count"),
+                      leader_alone=("leader_alone", "sum"),
+                      median_candidates=("n_candidates", "median"),
+                      max_candidates=("n_candidates", "max")))
+        print(table.to_string())
     metric, band = result.PRIMARY
     if band in args.bands:
         print(f"\n[onset-hfo] pre-specified comparison ({metric}, {band} band):")

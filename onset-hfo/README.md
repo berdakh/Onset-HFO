@@ -181,6 +181,13 @@ python -m onset_hfo.cli outcome --stop 60  # the first minute: a different answe
 python -m onset_hfo.cli stability          # 11 windows: does any of it hold?
 ```
 
+**So the pipeline stopped picking a winner.** `candidates_resected` reports
+the share of the channels that *cannot be told apart from the busiest one*
+(overlapping Poisson rate intervals) which the surgeon removed. On whole runs
+the data picks a single channel in only 9 of 20 patients — worst case, 24 tied
+channels out of 37 — and reporting the set instead of a winner costs 0.017 AUC.
+Never quote the single-channel number without `n_candidates` beside it.
+
 **Against expert HFO markings** — 20 subjects of [ds003498](https://openneuro.org/datasets/ds003498)
 (Zurich interictal slow-wave sleep, 2000 Hz), 41,187 expert-marked events,
 scored only on the channels the annotators reviewed:

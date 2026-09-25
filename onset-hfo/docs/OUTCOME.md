@@ -103,6 +103,7 @@ who disagrees.
 | `share_in_rz` | what fraction of this patient's HFO events were on resected channels? |
 | `share_in_rz_incl_partial` | …counting margin channels as inside |
 | `top_channel_resected` | was the single busiest channel removed? (0/1) |
+| `candidates_resected` | what share of the channels that cannot be told apart from the busiest one was removed? |
 | `top3_resected` | what fraction of the three busiest channels was removed? |
 
 They disagree sharply, and that disagreement is a finding in itself — see
@@ -274,10 +275,91 @@ one of the five windows*.
 
 **This argues for a design change.** A report from this pipeline should name a
 *set of candidate channels* — those whose rates are not distinguishable from
-the leader — rather than a winner. `metrics.rank_channels` already declines to
-order channels whose Poisson intervals overlap; `outcome._top_channel_resected`
-takes a bare argmax and does not. Making the outcome metric refuse a tie the
-way the rate table already does is the next piece of work, and it is small.
+the leader — rather than a winner. `metrics.leader_separation` already uses
+exactly that rule to decide whether a recording has a leader at all;
+`_top_channel_resected` took a bare argmax and did not. The next section is
+what happened when that was fixed: the data picks a single channel in fewer
+than half the patients, and reporting the tied set instead costs 0.017 AUC.
+
+---
+
+## Refusing to pick a winner
+
+The window study said the busiest channel is often not the same channel. The
+fix is not to pick more carefully, it is to stop picking when the data has not
+picked: `candidate_channels` returns every channel whose Poisson rate interval
+overlaps the leader's — the rule
+:func:`onset_hfo.metrics.leader_separation` already uses to decide whether a
+recording has a leader at all — and `candidates_resected` reports the share of
+that set which was removed. It reduces to `top_channel_resected` exactly when
+the set has one member, so it is a strict generalisation, not a different
+question. The rule is an interval rather than a constant, so it tightens by
+itself as the window grows and needed no tuning.
+
+### Most of the time, the data did not pick one channel
+
+| | expert | rms |
+|---|---|---|
+| patients where the leader stands alone | **9/20** | **8/20** |
+| median candidate-set size | 2 | 2 |
+| largest candidate set | 24 of 37 channels (sub-12) | 10 of 37 |
+
+So `top_channel_resected` was reporting a winner the data had chosen in fewer
+than half the patients. For sub-12 it named one channel out of **24 that
+cannot be told apart from it**.
+
+### It costs almost nothing at the group level
+
+Fast-ripple band, reviewed channels, whole runs:
+
+| source | metric | seizure-free | recurrence | AUC (95% CI) | p |
+|---|---|---|---|---|---|
+| expert | `top_channel_resected` | 0.85 | 0.43 | 0.709 (0.50–0.92) | 0.12 |
+| expert | `candidates_resected` | 0.78 | 0.52 | 0.692 (0.45–0.91) | 0.15 |
+| rms | `top_channel_resected` | 0.77 | 0.43 | 0.670 (0.45–0.89) | 0.17 |
+| rms | `candidates_resected` | 0.77 | 0.50 | 0.670 (0.41–0.91) | 0.20 |
+
+AUC moves by 0.017 for the experts and not at all for us. **Being honest about
+ties is nearly free**, which is the argument for doing it: the per-patient
+statement becomes true without the cohort-level claim getting weaker.
+
+`candidates_all_resected` — was the *whole* tied set removed? — is the more
+demanding question and does worse (expert 0.665, p = 0.35; rms 0.593,
+p = 0.64), which is what you would expect of a stricter criterion on twenty
+patients.
+
+### It makes the per-patient number steadier, and the group number no steadier
+
+Across the five disjoint 60-second windows:
+
+| | expert | rms |
+|---|---|---|
+| mean per-patient movement, `top_channel_resected` | 0.55 | 0.20 |
+| mean per-patient movement, `candidates_resected` | **0.30** | **0.18** |
+| AUC spread, `top_channel_resected` | 0.25 | 0.09 |
+| AUC spread, `candidates_resected` | **0.16** | **0.24** |
+
+Both arms' *per-patient* values move less — which is the point, since that is
+what a clinician would read. The *group* statistic is another matter: its
+spread halves for the experts and more than doubles for our detector.
+
+The reason is visible in the set sizes. In a 60-second window the median
+candidate set is 4.5 channels (expert) and 3.5 (rms), against 2 on the whole
+run, and the set size swings by a mean of 7 and 9 channels respectively
+between windows. Our detector sees a median of 30 fast-ripple events per
+60-second window against the experts' 134, so its intervals are wider and its
+set size is the more volatile of the two. **Candidate sets do not rescue a
+short window; they make its uncertainty visible.** On the whole run — the
+default — both arms sit at a median set of 2.
+
+### What to use
+
+Report `candidates_resected` and the set itself. `top_channel_resected` stays
+in the tables because it is the pre-specified comparison and the one
+comparable to the published literature, but it should not be quoted without
+`n_candidates` beside it. A report that names one channel when eleven are tied
+is not more decisive than one that names eleven; it is wrong in a way that
+cannot be checked from the output.
 
 ---
 

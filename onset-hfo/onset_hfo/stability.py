@@ -149,7 +149,8 @@ class StabilityResult:
             })
         return pd.DataFrame(rows).sort_values(["source", "subject"]).reset_index(drop=True)
 
-    def decision_stability(self, band: str | None = None) -> pd.DataFrame:
+    def decision_stability(self, band: str | None = None,
+                           metric: str | None = None) -> pd.DataFrame:
         """Per patient: does the *metric* give the same answer in every window?
 
         :meth:`top_channel_stability` asks whether the same channel wins.
@@ -161,7 +162,7 @@ class StabilityResult:
         identity is the fragile thing; the decision built on it is less so.
         """
         band = band or self.primary[1]
-        metric = self.primary[0]
+        metric = metric or self.primary[0]
         frame = self.subjects
         if not len(frame):
             return pd.DataFrame()
@@ -172,10 +173,11 @@ class StabilityResult:
             if not len(values):
                 continue
             rows.append({
-                "subject": subject, "source": source, "band": band,
+                "subject": subject, "source": source, "band": band, "metric": metric,
                 "n_windows": int(len(values)),
                 "n_distinct_answers": int(values.nunique()),
                 "share_inside": float(values.mean()),
+                "spread": float(values.max() - values.min()),
                 "stable": bool(values.nunique() == 1),
             })
         return pd.DataFrame(rows).sort_values(["source", "subject"]).reset_index(drop=True)
