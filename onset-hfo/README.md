@@ -25,7 +25,15 @@ the schema**.
 
 ---
 
-## Start here (four notebooks, no setup)
+## Start here
+
+New to the project? [**docs/TUTORIAL.html**](docs/TUTORIAL.html) is a standalone
+walkthrough — the research question, the signal, the traps, every measured
+result and what it does and does not support. One file, opens in a browser.
+
+Otherwise, run something:
+
+## Four notebooks, no setup
 
 | | Notebook | What it does | Needs |
 |---|---|---|---|
