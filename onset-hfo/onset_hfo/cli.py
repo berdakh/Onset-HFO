@@ -32,6 +32,7 @@ from onset_hfo.config import (
     ensure_dirs,
 )
 from onset_hfo.outcome import FULL_RUN_S
+from onset_hfo.stability import DISJOINT_LENGTH, GROWING_WINDOWS
 
 
 def _cmd_run(args: argparse.Namespace) -> int:
@@ -178,6 +179,33 @@ def _cmd_outcome(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_stability(args: argparse.Namespace) -> int:
+    """Ask whether the channel ranking is stable enough to carry the claim."""
+    from onset_hfo.stability import plot_stability, stability_study
+
+    ensure_dirs()
+    result = stability_study(
+        growing=tuple(args.growing), disjoint_length=args.disjoint,
+        dataset=args.dataset, detector=args.detector, bands=tuple(args.bands),
+        subjects=args.subjects)
+    if not len(result.groups):
+        print("[onset-hfo] nothing measured")
+        return 1
+    print("\n[onset-hfo] growing windows, "
+          f"{result.primary[0]} / {result.primary[1]}:")
+    print(result.curve().to_string(index=False))
+    print(f"\n[onset-hfo] spread across disjoint {args.disjoint:g} s windows:")
+    print(result.spread().to_string(index=False))
+    stability = result.top_channel_stability()
+    if len(stability):
+        print("\n[onset-hfo] is the busiest channel the same channel?")
+        print(stability.to_string(index=False))
+    out = result.save(args.out)
+    if not args.no_figure:
+        plot_stability(result, out / "window_stability.png")
+    return 0
+
+
 def _cmd_runs(args: argparse.Namespace) -> int:
     from onset_hfo.datasets import list_runs
 
@@ -274,6 +302,22 @@ def build_parser() -> argparse.ArgumentParser:
                           "motor or language responses (default: drop them)")
     out.add_argument("--out", default=None, help=f"output directory (default: {RESULTS_DIR})")
     out.set_defaults(func=_cmd_outcome)
+
+    stab = sub.add_parser(
+        "stability",
+        help="is the channel ranking stable across analysis windows? (ds003498)")
+    stab.add_argument("--dataset", default="ds003498")
+    stab.add_argument("--subjects", nargs="+", default=None)
+    stab.add_argument("--growing", type=float, nargs="+", default=list(GROWING_WINDOWS),
+                      help="window ends for the growing arm, in seconds")
+    stab.add_argument("--disjoint", type=float, default=DISJOINT_LENGTH,
+                      help="length of each equal, non-overlapping window")
+    stab.add_argument("--detector", default="rms", choices=["rms", "line_length"])
+    stab.add_argument("--bands", nargs="+", default=["ripple", "fast_ripple"],
+                      choices=["ripple", "fast_ripple"])
+    stab.add_argument("--no-figure", action="store_true")
+    stab.add_argument("--out", default=None, help=f"output directory (default: {RESULTS_DIR})")
+    stab.set_defaults(func=_cmd_stability)
 
     runs = sub.add_parser("runs", help="list the runs available for a subject in the archive")
     runs.add_argument("--subject", default=DEFAULT_SUBJECT)
