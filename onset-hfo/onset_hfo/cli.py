@@ -191,9 +191,29 @@ def _cmd_outcome(args: argparse.Namespace) -> int:
 
 def _cmd_stability(args: argparse.Namespace) -> int:
     """Ask whether the channel ranking is stable enough to carry the claim."""
-    from onset_hfo.stability import plot_stability, stability_study
+    from onset_hfo.stability import across_runs, plot_stability, stability_study
 
     ensure_dirs()
+    if args.across_runs:
+        result = across_runs(runs_per_subject=args.across_runs, dataset=args.dataset,
+                             detector=args.detector, bands=tuple(args.bands),
+                             subjects=args.subjects, prune_cache=not args.keep_cache)
+        if not len(result.groups):
+            print("[onset-hfo] nothing measured")
+            return 1
+        print("\n[onset-hfo] AUC spread across runs (nights):")
+        print(result.spread(arm="run").to_string(index=False))
+        print("\n[onset-hfo] does the per-patient answer hold from run to run?")
+        print(result.decision_stability(arm="run").to_string(index=False))
+        pooled = result.groups.query("arm == 'pooled' and scope == 'reviewed'")
+        if len(pooled):
+            print("\n[onset-hfo] runs pooled per patient:")
+            print(pooled[["source", "band", "metric", "n_seizure_free", "n_recurrence",
+                          "mean_seizure_free", "mean_recurrence", "auc", "auc_lo",
+                          "auc_hi", "p_permutation"]].round(3).to_string(index=False))
+        print(f"\n[onset-hfo] {result.verdict_runs()}")
+        result.save(args.out)
+        return 0
     result = stability_study(
         growing=tuple(args.growing), disjoint_length=args.disjoint,
         dataset=args.dataset, detector=args.detector, bands=tuple(args.bands),
@@ -325,6 +345,13 @@ def build_parser() -> argparse.ArgumentParser:
     stab.add_argument("--detector", default="rms", choices=["rms", "line_length"])
     stab.add_argument("--bands", nargs="+", default=["ripple", "fast_ripple"],
                       choices=["ripple", "fast_ripple"])
+    stab.add_argument("--across-runs", type=int, default=0, metavar="N",
+                      help="instead of windows, score up to N runs per subject and "
+                           "pool them: does the answer hold from one night to the "
+                           "next? ds003498 has 385 runs (~46 GB), so slices are "
+                           "deleted after use unless --keep-cache")
+    stab.add_argument("--keep-cache", action="store_true",
+                      help="with --across-runs, keep each downloaded slice")
     stab.add_argument("--no-figure", action="store_true")
     stab.add_argument("--out", default=None, help=f"output directory (default: {RESULTS_DIR})")
     stab.set_defaults(func=_cmd_stability)

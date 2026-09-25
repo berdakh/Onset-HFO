@@ -219,6 +219,89 @@ def test_verdict_names_both_arms(result):
     assert "0.82" in text and "0.71" in text and "disjoint" in text
 
 
+# -- pooling a subject's runs ---------------------------------------------
+
+def _run_channels(rows):
+    return pd.DataFrame(rows, columns=["subject", "band", "channel", "run", "zone",
+                                       "eloquent", "reviewed", "expert_events",
+                                       "rms_events"])
+
+
+@pytest.fixture
+def resections():
+    from onset_hfo.clinical import Resection
+
+    return {"sub-01": Resection(subject="sub-01", resected=("A1", "A2"), eloquent=())}
+
+
+def test_pooling_adds_the_runs_up(resections):
+    """Rates add, so two runs of a channel are one longer recording of it."""
+    from onset_hfo.stability import pool_runs
+
+    frame = _run_channels([
+        ("sub-01", "ripple", "A1-A2", "01", "resected", False, True, 10.0, 4.0),
+        ("sub-01", "ripple", "A1-A2", "02", "resected", False, True, 6.0, 2.0),
+        ("sub-01", "ripple", "B1-B2", "01", "spared", False, True, 1.0, 1.0),
+        ("sub-01", "ripple", "B1-B2", "02", "spared", False, True, 1.0, 1.0),
+    ])
+    pooled = pool_runs(frame, resections, "rms", 300.0, ("ripple",)).set_index("source")
+    assert pooled.loc["expert", "n_events"] == pytest.approx(18.0)
+    assert pooled.loc["rms", "n_events"] == pytest.approx(8.0)
+    assert pooled.loc["expert", "n_runs"] == 2
+
+
+def test_a_channel_reviewed_in_any_run_counts_as_reviewed(resections):
+    """The annotators marked events; a quiet segment is not an unreviewed one."""
+    from onset_hfo.stability import pool_runs
+
+    frame = _run_channels([
+        ("sub-01", "ripple", "A1-A2", "01", "resected", False, True, 10.0, 4.0),
+        ("sub-01", "ripple", "A1-A2", "02", "resected", False, False, 0.0, 1.0),
+    ])
+    pooled = pool_runs(frame, resections, "rms", 300.0, ("ripple",))
+    assert len(pooled) and pooled["n_channels"].iloc[0] == 1
+
+
+def test_pooling_drops_eloquent_channels(resections):
+    from onset_hfo.stability import pool_runs
+
+    frame = _run_channels([
+        ("sub-01", "ripple", "A1-A2", "01", "resected", False, True, 10.0, 4.0),
+        ("sub-01", "ripple", "E1-E2", "01", "spared", True, True, 99.0, 99.0),
+    ])
+    pooled = pool_runs(frame, resections, "rms", 300.0, ("ripple",))
+    assert pooled["n_channels"].iloc[0] == 1
+
+
+def test_pooling_narrows_the_candidate_set(resections):
+    """More recording separates channels a single run could not tell apart.
+
+    The same counts over one run leave two candidates; summed over five runs
+    the Poisson intervals no longer overlap and the set is one.
+    """
+    from onset_hfo.outcome import candidate_channels
+    from onset_hfo.stability import pool_runs
+
+    one = pd.Series({"A1-A2": 30.0, "B1-B2": 20.0})
+    assert len(candidate_channels(one, 5.0)) == 2
+
+    rows = []
+    for run in range(1, 6):
+        rows += [("sub-01", "ripple", "A1-A2", f"{run:02d}", "resected", False, True,
+                  30.0, 0.0),
+                 ("sub-01", "ripple", "B1-B2", f"{run:02d}", "spared", False, True,
+                  20.0, 0.0)]
+    pooled = pool_runs(_run_channels(rows), resections, "rms", 300.0, ("ripple",))
+    expert = pooled[pooled["source"] == "expert"].iloc[0]
+    assert expert["n_runs"] == 5 and expert["n_candidates"] == 1
+
+
+def test_pooling_an_empty_table_is_not_an_error(resections):
+    from onset_hfo.stability import pool_runs
+
+    assert pool_runs(pd.DataFrame(), resections, "rms", 300.0, ("ripple",)).empty
+
+
 # -- the plan --------------------------------------------------------------
 
 def test_the_default_windows_end_at_the_full_run():
