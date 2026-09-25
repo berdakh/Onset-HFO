@@ -47,6 +47,9 @@ class Prepared:
     sfreq: float
     t_offset: float               #: seconds; add to a local time to get file time
     montage: str                  #: "bipolar" or "monopolar"
+    #: Mains frequency actually notched, resolved from the config or the
+    #: recording. Carried here so no later step has to guess it again.
+    line_freq: float = 60.0
     pairs: list[tuple[str, str]] = field(default_factory=list)
     steps: list[str] = field(default_factory=list)
     recording: Recording | None = None
@@ -143,13 +146,15 @@ def prepare(rec: Recording, cfg: PreprocessConfig | None = None, verbose: bool =
             raw.filter(l_freq=cfg.highpass, h_freq=None, fir_design="firwin",
                        phase="zero", verbose="ERROR")
             steps.append(f"high-pass {cfg.highpass:g} Hz (zero-phase FIR)")
+        line_freq = cfg.line_freq if cfg.line_freq is not None else rec.line_freq
         if cfg.notch:
+            source = "configured" if cfg.line_freq is not None else "from the dataset"
             nyq = raw.info["sfreq"] / 2.0
-            freqs = [f for f in np.arange(cfg.line_freq, nyq, cfg.line_freq) if f < 0.9 * nyq]
+            freqs = [f for f in np.arange(line_freq, nyq, line_freq) if f < 0.9 * nyq]
             if freqs:
                 raw.notch_filter(freqs=freqs, notch_widths=2.0, fir_design="firwin",
                                  phase="zero", verbose="ERROR")
-                steps.append(f"notch {cfg.line_freq:g} Hz + harmonics "
+                steps.append(f"notch {line_freq:g} Hz ({source}) + harmonics "
                              f"({', '.join(f'{f:g}' for f in freqs)} Hz, 2 Hz wide)")
 
     data = raw.get_data(picks="all") * 1e6  # volts -> microvolts
@@ -171,6 +176,7 @@ def prepare(rec: Recording, cfg: PreprocessConfig | None = None, verbose: bool =
 
     prepared = Prepared(data=np.ascontiguousarray(data, dtype=np.float64), ch_names=names,
                         sfreq=float(raw.info["sfreq"]), t_offset=rec.t_offset, montage=montage,
+                        line_freq=float(line_freq),
                         pairs=pairs, steps=steps, recording=rec)
     if verbose:
         print(f"[onset-hfo] preprocessed: {prepared.n_channels} {montage} channels, "

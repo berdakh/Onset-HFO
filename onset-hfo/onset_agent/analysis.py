@@ -283,7 +283,10 @@ def _recording_metadata(s: AnalysisSession) -> dict:
 def _channel_qc(s: AnalysisSession, max_channels: int = 40) -> dict:
     """Which channels are analysable, which were dropped, and how noisy each is."""
     prep = s.prepared
-    line = s.config.preprocess.line_freq
+    # The frequency that was actually notched, not the configured one: the
+    # config may say "use the recording's", and this check is meaningless if
+    # it measures a different frequency than the filter removed.
+    line = prep.line_freq
     nyquist = prep.sfreq / 2.0
     # Power right at the mains frequency relative to a neighbouring band: a
     # crude but honest line-noise index. The notch has already run, so a

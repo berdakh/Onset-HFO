@@ -75,10 +75,28 @@ def _truth_rows(truth: pd.DataFrame, kind: str | None = None) -> pd.DataFrame:
 
 def evaluate_detections(events: list[Event], truth: pd.DataFrame, detector: str | None = None,
                         kind: str = "ripple", tolerance: float = 0.02,
-                        accepted_only: bool = True) -> EvaluationResult:
-    """Score one detector's events against the implanted ground truth."""
+                        accepted_only: bool = True,
+                        channels: list[str] | None = None) -> EvaluationResult:
+    """Score one detector's events against a ground truth.
+
+    Parameters
+    ----------
+    channels:
+        Restrict scoring to these channels. **Essential for expert-annotated
+        real data**, where only some channels were reviewed: a detection on an
+        unreviewed channel is not a false positive, it is unjudged, and
+        counting it as wrong would understate precision for no reason other
+        than how much of the recording somebody had time to read.
+        ``None`` scores everything, which is right for synthetic data where
+        every channel's truth is known.
+    """
     dets = [e for e in events
             if (detector is None or e.detector == detector) and (e.accepted or not accepted_only)]
+    if channels is not None:
+        allowed = set(channels)
+        dets = [e for e in dets if e.channel in allowed]
+        if "channel" in truth.columns:
+            truth = truth[truth["channel"].isin(allowed)]
     target = _truth_rows(truth, kind)
     others = {k: _truth_rows(truth, k) for k in truth["kind"].unique() if k != kind}
 
@@ -116,11 +134,21 @@ def evaluate_detections(events: list[Event], truth: pd.DataFrame, detector: str 
 
 
 def _overlapping(frame: pd.DataFrame, det: Event, contacts: set[str], tol: float) -> list[int]:
+    """Rows of ``frame`` that overlap this detection in time, on its channel.
+
+    Two ways to decide "same channel", because the two ground truths express
+    it differently. Expert annotations name a bipolar channel outright
+    (``HL2-HL3``), so they are matched by channel name -- exactly, since
+    ``HL1-HL2`` and ``HL2-HL3`` share a contact but are different channels and
+    one must not claim the other's events. Implanted synthetic events are
+    placed on a single *contact*, which legitimately appears in the two
+    bipolar pairs built from it, so those are matched by contact membership.
+    """
     if frame.empty:
         return []
-    mask = (frame["contact"].isin(contacts)
-            & (frame["start"] - tol < det.stop)
-            & (det.start - tol < frame["stop"]))
+    same_channel = (frame["channel"] == det.channel) if "channel" in frame.columns \
+        else frame["contact"].isin(contacts)
+    mask = same_channel & (frame["start"] - tol < det.stop) & (det.start - tol < frame["stop"])
     return list(np.flatnonzero(mask.to_numpy()))
 
 

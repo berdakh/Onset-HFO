@@ -38,13 +38,11 @@ import pandas as pd
 from onset_hfo.config import (
     DATA_CACHE,
     DATASET,
-    DEFAULT_ACQ,
-    DEFAULT_RUN,
-    DEFAULT_SESSION,
+    DATASETS,
     DEFAULT_SUBJECT,
-    DEFAULT_TASK,
     DEFAULT_TSTART,
     DEFAULT_TSTOP,
+    DatasetSpec,
 )
 
 __all__ = [
@@ -121,8 +119,19 @@ class Recording:
         onset. A weak, textual reference -- NOT a curated seizure-onset-zone
         label. See ``docs/DATA.md``.
     ground_truth:
-        Only for synthetic recordings: the implanted events. ``None`` for real
-        data, because nobody has marked HFOs in this archive.
+        Expert or implanted events, when the recording has them: the synthetic
+        simulator always, and ``ds003498`` -- whose authors marked HFOs channel
+        by channel -- for real data. ``None`` for a recording nobody has
+        annotated, such as anything in ``ds003029``.
+    reviewed_channels:
+        Channels an annotator actually examined. Crucial and easy to miss: in
+        ``ds003498`` only a subset of channels was reviewed (the paper kept the
+        three most mesial bipolar channels in temporal-lobe cases), so a
+        detection on an unreviewed channel is not a false positive -- it is
+        unjudged. Evaluation restricts itself to these channels.
+    line_freq:
+        Mains frequency at the recording site, carried from the dataset so the
+        notch filter is right without the caller having to remember.
     """
 
     raw: mne.io.BaseRaw
@@ -142,6 +151,9 @@ class Recording:
     #: a rate change measured against one means something weaker.
     seizure_marker: str = "none"
     ground_truth: pd.DataFrame | None = None
+    reviewed_channels: list[str] = field(default_factory=list)
+    line_freq: float = 60.0
+    dataset_id: str = ""
     citation: str = ""
     notes: list[str] = field(default_factory=list)
 
@@ -176,6 +188,7 @@ class Recording:
         """A JSON-safe description of where this data came from."""
         return {
             "source": self.source,
+            "dataset": self.dataset_id,
             "subject": self.subject,
             "task": self.task,
             "run": self.run,
@@ -187,6 +200,9 @@ class Recording:
             "seizure_offset_s": self.seizure[1],
             "seizure_marker": self.seizure_marker,
             "bad_channels": list(self.bads),
+            "line_freq_hz": self.line_freq,
+            "n_expert_events": (0 if self.ground_truth is None else int(len(self.ground_truth))),
+            "reviewed_channels": list(self.reviewed_channels),
             "citation": self.citation,
             "notes": list(self.notes),
         }
@@ -241,12 +257,44 @@ def _http_get(url: str, byte_range: tuple[int, int] | None = None, timeout: floa
             return fh.read()
 
 
-def _dataset_url(*parts: str) -> str:
-    return "/".join([DATASET.base_url, DATASET.dataset_id, *parts])
+def _spec(dataset: str | DatasetSpec | None) -> DatasetSpec:
+    """Resolve a dataset id (or a spec) to its :class:`DatasetSpec`."""
+    if isinstance(dataset, DatasetSpec):
+        return dataset
+    if dataset is None:
+        return DATASET
+    try:
+        return DATASETS[dataset]
+    except KeyError:
+        raise ValueError(f"Unknown dataset {dataset!r}; known: {', '.join(DATASETS)}") from None
 
 
-def _stem(subject: str, session: str, task: str, acq: str, run: str) -> str:
-    return f"{subject}/{session}/ieeg/{subject}_{session}_task-{task}_acq-{acq}_run-{run}"
+def _dataset_url(spec: DatasetSpec, *parts: str) -> str:
+    return "/".join([spec.base_url, spec.dataset_id, *parts])
+
+
+def _stem(spec: DatasetSpec, subject: str, run: str, session: str | None = None,
+          task: str | None = None, acq: str | None = None) -> str:
+    """Build the BIDS path for one run, using only the entities that exist.
+
+    Archives differ: ``ds003029`` names files
+    ``sub-pt01_ses-presurgery_task-ictal_acq-ecog_run-01``, while ``ds003498``
+    names them ``sub-01_ses-interictalsleep_run-01`` with no task or acq at
+    all. Hard-coding either shape is how a loader ends up serving one dataset.
+    """
+    session = session if session is not None else spec.session
+    task = task if task is not None else spec.task
+    acq = acq if acq is not None else spec.acq
+    parts = [subject]
+    if session:
+        parts.append(session)
+    if task:
+        parts.append(f"task-{task}")
+    if acq:
+        parts.append(f"acq-{acq}")
+    parts.append(f"run-{run}")
+    folder = f"{subject}/{session}/ieeg" if session else f"{subject}/ieeg"
+    return f"{folder}/{'_'.join(parts)}"
 
 
 # --------------------------------------------------------------------------
@@ -300,14 +348,18 @@ Mk1=New Segment,,1,1,0,00000000000000000000
 # --------------------------------------------------------------------------
 
 
-def list_runs(subject: str = DEFAULT_SUBJECT, session: str = DEFAULT_SESSION) -> pd.DataFrame:
+def list_runs(subject: str = DEFAULT_SUBJECT, session: str | None = None,
+              dataset: str | None = None) -> pd.DataFrame:
     """List the iEEG runs available for a subject in the public archive.
 
-    Useful when you want a different recording than the default example.
-    Returns a table with columns ``task``, ``acq``, ``run`` and ``size_mb``.
+    Returns a table with ``task``, ``acq``, ``run`` and ``size_mb``; the task
+    and acq columns are empty for archives whose filenames omit them.
     """
-    prefix = f"{DATASET.dataset_id}/{subject}/{session}/ieeg/"
-    url = f"{DATASET.base_url}/?list-type=2&prefix={prefix}&max-keys=1000"
+    spec = _spec(dataset)
+    session = session if session is not None else spec.session
+    prefix = f"{spec.dataset_id}/{subject}/{session}/ieeg/" if session \
+        else f"{spec.dataset_id}/{subject}/ieeg/"
+    url = f"{spec.base_url}/?list-type=2&prefix={prefix}&max-keys=1000"
     xml = _http_get(url).decode("utf-8", "replace")
     rows = []
     for key, size in re.findall(r"<Key>([^<]+)</Key>\s*<LastModified>[^<]*</LastModified>\s*"
@@ -315,24 +367,30 @@ def list_runs(subject: str = DEFAULT_SUBJECT, session: str = DEFAULT_SESSION) ->
         if not key.endswith("_ieeg.eeg"):
             continue
         name = Path(key).name
-        m = re.search(r"task-([a-zA-Z0-9]+)_acq-([a-zA-Z0-9]+)_run-(\d+)", name)
-        if m:
-            rows.append({"subject": subject, "task": m.group(1), "acq": m.group(2),
-                         "run": m.group(3), "size_mb": round(int(size) / 1e6, 1)})
-    return pd.DataFrame(rows).sort_values(["task", "run"]).reset_index(drop=True)
+        run = re.search(r"run-(\d+)", name)
+        if not run:
+            continue
+        task = re.search(r"task-([a-zA-Z0-9]+)", name)
+        acq = re.search(r"acq-([a-zA-Z0-9]+)", name)
+        rows.append({"subject": subject, "task": task.group(1) if task else "",
+                     "acq": acq.group(1) if acq else "", "run": run.group(1),
+                     "size_mb": round(int(size) / 1e6, 1)})
+    table = pd.DataFrame(rows)
+    return table.sort_values(["task", "run"]).reset_index(drop=True) if len(table) else table
 
 
 def fetch_slice(
     subject: str = DEFAULT_SUBJECT,
-    task: str = DEFAULT_TASK,
-    run: str = DEFAULT_RUN,
+    task: str | None = None,
+    run: str | None = None,
     t_start: float = DEFAULT_TSTART,
     t_stop: float = DEFAULT_TSTOP,
-    session: str = DEFAULT_SESSION,
-    acq: str = DEFAULT_ACQ,
+    session: str | None = None,
+    acq: str | None = None,
     cache_dir: Path | None = None,
     force: bool = False,
     verbose: bool = True,
+    dataset: str | None = None,
 ) -> Recording:
     """Download (once) and load ``[t_start, t_stop)`` of a public iEEG run.
 
@@ -364,17 +422,23 @@ def fetch_slice(
     """
     if t_stop <= t_start:
         raise ValueError("t_stop must be greater than t_start")
-    cache_dir = Path(cache_dir or DATA_CACHE) / DATASET.dataset_id
-    slice_dir = cache_dir / f"{subject}_task-{task}_run-{run}_{t_start:g}-{t_stop:g}s"
+    spec = _spec(dataset)
+    session = session if session is not None else spec.session
+    task = task if task is not None else spec.task
+    acq = acq if acq is not None else spec.acq
+    run = run if run is not None else spec.default_run
+    cache_dir = Path(cache_dir or DATA_CACHE) / spec.dataset_id
+    tag = f"task-{task}_" if task else ""
+    slice_dir = cache_dir / f"{subject}_{tag}run-{run}_{t_start:g}-{t_stop:g}s"
     meta_path = slice_dir / "slice.json"
-    stem = _stem(subject, session, task, acq, run)
+    stem = _stem(spec, subject, run, session, task, acq)
 
     if force or not meta_path.exists():
         slice_dir.mkdir(parents=True, exist_ok=True)
         if verbose:
-            print(f"[onset-hfo] fetching {subject} {task} run-{run} "
-                  f"[{t_start:g}, {t_stop:g}) s from OpenNeuro {DATASET.dataset_id}")
-        vhdr_text = _http_get(_dataset_url(f"{stem}_ieeg.vhdr")).decode("utf-8", "replace")
+            print(f"[onset-hfo] fetching {subject} {task or spec.dataset_id} run-{run} "
+                  f"[{t_start:g}, {t_stop:g}) s from OpenNeuro {spec.dataset_id}")
+        vhdr_text = _http_get(_dataset_url(spec, f"{stem}_ieeg.vhdr")).decode("utf-8", "replace")
         header = _parse_vhdr(vhdr_text)
         sfreq = header["sfreq"]
         frame = header["n_channels"] * header["bytes_per_sample"]
@@ -385,7 +449,7 @@ def fetch_slice(
             warnings.warn(f"Requested slice is {mb:.0f} MB; consider a shorter window.", stacklevel=2)
         if verbose:
             print(f"[onset-hfo]   {header['n_channels']} channels @ {sfreq:g} Hz -> {mb:.1f} MB")
-        payload = _http_get(_dataset_url(f"{stem}_ieeg.eeg"), byte_range=(first, last))
+        payload = _http_get(_dataset_url(spec, f"{stem}_ieeg.eeg"), byte_range=(first, last))
         # Guard against a proxy that ignores Range and returns the whole file.
         expected = last - first + 1
         if len(payload) > expected:
@@ -400,12 +464,12 @@ def fetch_slice(
 
         for side in ("channels.tsv", "events.tsv"):
             try:
-                blob = _http_get(_dataset_url(f"{stem}_{side}"))
+                blob = _http_get(_dataset_url(spec, f"{stem}_{side}"))
                 (slice_dir / side).write_bytes(blob)
             except Exception:  # the archive does not always ship events.tsv
                 pass
         meta_path.write_text(json.dumps({
-            "dataset": DATASET.dataset_id, "subject": subject, "session": session, "task": task,
+            "dataset": spec.dataset_id, "subject": subject, "session": session, "task": task,
             "acq": acq, "run": run, "t_start": t_start, "t_stop": t_stop,
             "sfreq": sfreq, "n_channels": header["n_channels"],
             "vhdr": f"{Path(stem).name}_ieeg.vhdr",
@@ -439,6 +503,7 @@ def _load_cached_slice(slice_dir: Path, meta: dict, verbose: bool = True) -> Rec
                 warnings.simplefilter("ignore")
                 raw.set_channel_types(types, verbose="ERROR")
 
+    spec = _spec(meta.get("dataset"))
     seizure_onset, seizure_offset, marker_kind = _seizure_times(events, with_kind=True)
     seizure = (seizure_onset, seizure_offset)
     marked = parse_marked_contacts(events, raw.ch_names, seizure)
@@ -453,6 +518,17 @@ def _load_cached_slice(slice_dir: Path, meta: dict, verbose: bool = True) -> Rec
     if raw.info["sfreq"] < 600:
         notes.append(f"sampling rate {raw.info['sfreq']:g} Hz: ripples (80-250 Hz) only, "
                      "fast ripples (250-500 Hz) are not analysable in this recording")
+    notes.append(f"mains frequency {spec.line_freq:g} Hz ({spec.dataset_id})")
+
+    truth = reviewed = None
+    if spec.has_hfo_annotations:
+        truth, reviewed = parse_hfo_annotations(events, window=(t_start, float(meta["t_stop"])))
+        notes.append(
+            f"expert HFO markings: {len(truth)} events on {len(reviewed)} reviewed channels "
+            f"({', '.join(reviewed[:6])}{', ...' if len(reviewed) > 6 else ''})")
+        notes.append("only those channels were annotated, so a detection elsewhere is unjudged "
+                     "rather than wrong; evaluation is restricted to them")
+
     rec = Recording(
         raw=raw,
         source=f"openneuro:{meta['dataset']}",
@@ -466,7 +542,11 @@ def _load_cached_slice(slice_dir: Path, meta: dict, verbose: bool = True) -> Rec
         channels=channels,
         marked_contacts=marked,
         seizure_marker=marker_kind,
-        citation=DATASET.citation,
+        ground_truth=truth,
+        reviewed_channels=reviewed or [],
+        line_freq=spec.line_freq,
+        dataset_id=spec.dataset_id,
+        citation=spec.citation,
         notes=notes,
     )
     if verbose:
@@ -487,16 +567,19 @@ def load_example(**kwargs) -> Recording:
 # --------------------------------------------------------------------------
 
 
-def list_subjects() -> list[str]:
+def list_subjects(dataset: str | None = None) -> list[str]:
     """Every ``sub-*`` directory in the archive that contains a signal file.
 
     One S3 listing, no signal downloaded. Used to plan a cohort run before
-    committing to the bandwidth.
+    committing to the bandwidth. Reading the bucket rather than
+    ``participants.tsv`` on purpose: the two disagree when a participant has a
+    row but no recordings, and it is the recordings that can be analysed.
     """
+    spec = _spec(dataset)
     subjects: set[str] = set()
     token = ""
     for _page in range(20):
-        url = (f"{DATASET.base_url}/?list-type=2&prefix={DATASET.dataset_id}/"
+        url = (f"{spec.base_url}/?list-type=2&prefix={spec.dataset_id}/"
                f"&max-keys=1000")
         if token:
             from urllib.parse import quote
@@ -595,6 +678,77 @@ def _seizure_times(events: pd.DataFrame | None,
     if offset is not None and offset <= onset:
         offset = None
     return (onset, offset, kind) if with_kind else (onset, offset)
+
+
+#: ``ripple_HL2-3`` -> kind "ripple", contacts HL2 and HL3.
+_HFO_LABEL = re.compile(r"^(ripple|fr|frandr)_([A-Za-z]+[A-Za-z\']*?)(\d{1,3})-(\d{1,3})$")
+#: Some labels name a single contact rather than a bipolar pair.
+_HFO_LABEL_SINGLE = re.compile(r"^(ripple|fr|frandr)_([A-Za-z]+[A-Za-z\']*?\d{1,3})$")
+
+#: What each label means, as a band this pipeline can actually detect in.
+_LABEL_BANDS = {"ripple": ("ripple",), "fr": ("fast_ripple",),
+                "frandr": ("ripple", "fast_ripple")}
+
+
+def parse_hfo_annotations(events: pd.DataFrame | None,
+                          window: tuple[float, float] | None = None
+                          ) -> tuple[pd.DataFrame, list[str]]:
+    """Expert HFO markings from a BIDS ``events.tsv`` into a truth table.
+
+    The labels look like ``ripple_HL2-3``, ``fr_PHR1-2`` or ``frandr_AHR3-4``:
+    the kind of oscillation, then the channel, which is a *bipolar pair*
+    written with the shared electrode name once. We expand that to this
+    package's channel naming (``HL2-HL3``) so detections and markings can be
+    compared without a mapping table.
+
+    A ``frandr`` event -- a fast ripple riding on a ripple -- becomes **two
+    rows**, one per band. That is not double counting: the event really does
+    carry evidence in both bands, and each band is scored separately.
+
+    Returns
+    -------
+    (truth, reviewed_channels)
+        ``truth`` has one row per (event, band) with ``kind``, ``channel``,
+        ``contact``, ``start`` and ``stop`` in original-recording seconds.
+        ``reviewed_channels`` are the channels that carry at least one
+        marking -- the only channels on which a detection can be judged.
+    """
+    columns = ["kind", "channel", "label", "contact", "contact_b", "start", "stop", "duration_ms"]
+    if events is None or "trial_type" not in events.columns:
+        return pd.DataFrame(columns=columns), []
+
+    rows: list[dict] = []
+    reviewed: list[str] = []
+    for _, row in events.iterrows():
+        label = str(row.get("trial_type", ""))
+        match = _HFO_LABEL.match(label)
+        if match:
+            kind, lead, first, second = match.groups()
+            a, b = f"{lead}{first}", f"{lead}{second}"
+            channel = f"{a}-{b}"
+        else:
+            single = _HFO_LABEL_SINGLE.match(label)
+            if not single:
+                continue
+            kind, a = single.groups()
+            b, channel = "", a
+        try:
+            start = float(row["onset"])
+            duration = float(row.get("duration", 0) or 0.0)
+        except (TypeError, ValueError):
+            continue
+        if channel not in reviewed:
+            reviewed.append(channel)
+        if window is not None and not (window[0] <= start < window[1]):
+            continue
+        for band in _LABEL_BANDS[kind]:
+            rows.append({"kind": band, "channel": channel, "label": label, "contact": a,
+                         "contact_b": b, "start": start, "stop": start + duration,
+                         "duration_ms": duration * 1000.0})
+    truth = pd.DataFrame(rows, columns=columns)
+    if len(truth):
+        truth = truth.sort_values(["start", "channel"]).reset_index(drop=True)
+    return truth, sorted(reviewed)
 
 
 def parse_marked_contacts(
