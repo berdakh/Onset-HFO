@@ -1,15 +1,17 @@
-# Publish the project website (the site/ directory) to GitHub Pages.
+# Publish the project website (site/) to the gh-pages branch.
 #
-# The site is deployed by Actions rather than from a branch folder, because
-# "deploy from a branch" can only serve the repository root or a root-level
-# /docs, and this repository's documentation lives at onset-hfo/docs/ while the
-# website is a separate, much smaller thing in site/.
+# Why this shape: GitHub's own Pages actions ask the API to create the Pages
+# site, and this repository's workflow token is not allowed to
+# ("Create Pages site failed. Error: Resource not accessible by integration"),
+# so that route cannot bootstrap itself here. Pushing a branch needs nothing
+# but contents: write, which the workflow already has.
 #
-# configure-pages runs with enablement: true, so the first run of this workflow
-# tries to turn Pages on by itself. If your repository settings do not allow
-# that, the step fails with "Get Pages site failed" and the fix is one click:
-# Settings -> Pages -> Source -> GitHub Actions, then re-run the workflow.
-# After that, every push to master that touches site/ republishes.
+# gh-pages holds build output only. It is rewritten from scratch on every
+# publish -- there is no history worth keeping on it, and a force push keeps it
+# from growing a copy of every figure ever committed.
+#
+# Once, in the repository settings: Settings -> Pages -> Source ->
+# "Deploy from a branch" -> branch gh-pages, folder / (root).
 name: pages
 
 on:
@@ -19,30 +21,49 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
-  pages: write
-  id-token: write
+  contents: write
 
-# Never let two deployments race; let a running one finish.
 concurrency:
   group: pages
   cancel-in-progress: false
 
 jobs:
-  deploy:
+  publish:
     runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
+
       - name: Check the site has an entry point
         run: test -f site/index.html
-      - uses: actions/configure-pages@v5
-        with:
-          enablement: true
-      - uses: actions/upload-pages-artifact@v3
-        with:
-          path: site
-      - id: deployment
-        uses: actions/deploy-pages@v4
+
+      - name: Publish site/ to gh-pages
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          work="$RUNNER_TEMP/site"
+          cp -r site "$work"
+          # Branch-based Pages runs Jekyll, which drops files and folders
+          # beginning with an underscore. Nothing here starts with one today;
+          # this makes sure that stays irrelevant.
+          touch "$work/.nojekyll"
+          # site/README.md documents the directory for contributors; it is not
+          # part of the website.
+          rm -f "$work/README.md"
+          cd "$work"
+          git init -q -b gh-pages
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -q -m "Publish site from ${GITHUB_SHA:0:7}"
+          git push -q --force \
+            "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" gh-pages
+          echo "published $(find . -type f -not -path './.git/*' | wc -l) files to gh-pages"
+
+      - name: Where it will appear
+        run: |
+          echo "### Site published to \`gh-pages\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "URL once Settings → Pages → Source is set to *Deploy from a branch → gh-pages → / (root)*:" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "https://${GITHUB_REPOSITORY_OWNER}.github.io/${GITHUB_REPOSITORY#*/}/" >> "$GITHUB_STEP_SUMMARY"

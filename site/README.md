@@ -4,6 +4,12 @@ Published at **https://berdakh.github.io/onset-hfo/** by
 [`.github/workflows/pages.yml`](../.github/workflows/pages.yml) on every push to
 `master` that touches this directory.
 
+The workflow copies this directory onto the `gh-pages` branch, which holds
+nothing else and is rewritten from scratch each time. Do not edit `gh-pages`
+by hand -- the next publish overwrites it. GitHub's own Pages actions were
+tried first and could not be used: they ask the API to create the Pages site,
+and this repository's workflow token is not permitted to do that.
+
 * `index.html` — the whole page. Self-contained: inline CSS, no JavaScript, no
   external stylesheet or font. Edit it directly.
 * `img/` — copies of the figures in `onset-hfo/docs/img/`, which the pipeline
