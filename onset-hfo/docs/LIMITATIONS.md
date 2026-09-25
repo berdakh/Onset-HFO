@@ -39,6 +39,7 @@ the results and is prevented from inventing them.
 | **The shipped threshold is not the measured optimum.** The default stays at the literature's 5.0 SD; ripples prefer 1.5–2.0 SD. | Anyone running the defaults on interictal ripple data gets recall 0.12 and near-chance channel ranking unless they pass `--threshold interictal-agreement`. |
 | **The two bands need different thresholds, and only `outcome` applies them automatically.** Ripples rank best at 2.0 SD, fast ripples at 5.0 SD. | Running 2.0 SD in the fast-ripple band drops precision to 0.086 and flattens the outcome signal entirely (`docs/OUTCOME.md`). `run` and `benchmark` take whatever threshold you pass, for every band. |
 | **The outcome study is 13 seizure-free against 7 recurrences.** The smallest effect these group sizes can detect at 80% power is AUC 0.85. | Every p above 0.05 in `docs/OUTCOME.md` means "underpowered", not "no effect", and **no arm reaches 0.05**. 24 comparisons, uncorrected; the Bonferroni column is in the table. |
+| **A single short window is not a measurement, but a whole run is.** Across five *runs* on different nights the per-patient answer holds for 18/20 patients (experts) and 16/20 (ours); across five *minutes* of one run, 9/20 and 16/20. | Analyse whole runs, and pool a patient's runs where they exist. Never quote a result from a 60-second window. |
 | **The outcome result depends on the analysis window** — now measured (`onset-hfo stability`, `docs/OUTCOME.md`). Across five disjoint 60 s windows of the same recordings the expert AUC spans 0.566–0.819 and its p-value 0.007–0.613. | The 0.007 that this project once published was the most favourable of five minutes. The growing-window curve *does* settle from 180 s, so the whole-run number is a settled estimate of one recording; what is unstable is any single short window. |
 | **The busiest channel is often not the same channel.** Across those five windows the experts' top fast-ripple channel is identical in 7 of 20 patients and our detector's in 12 of 20; the inside/outside answer holds in 9 and 16. | **Addressed:** the outcome study now reports `candidates_resected` over the set of channels whose Poisson rate intervals overlap the leader's — the same rule `metrics.leader_separation` uses. On whole runs the data picks a single channel in only 9 of 20 patients (experts) and 8 of 20 (ours), median set size 2, worst case 24 tied channels of 37. Reporting the set costs 0.017 AUC. Never quote `top_channel_resected` without `n_candidates` beside it. |
 | **Resected contacts that were never recorded cannot be scored.** In five temporal-lobe subjects only 4 of 16 listed resected contacts appear in the recording. | Those patients' "share inside the resection" describes a quarter of their resection. `recordings.csv` carries `rz_coverage` per subject. |
@@ -95,11 +96,13 @@ matter most, in order:
    patients and 3/7 recurrences for the expert markings (AUC 0.71, p = 0.12)
    and 10/13 vs 3/7 for our detector (0.67, p = 0.17). The direction is the
    published one; the cohort cannot establish it.
-4. **Is the channel ranking stable?** This is now the top question, and it
-   displaced the one above. The same analysis gave AUC 0.82 on 60 s and 0.71
-   on 300 s, moving on two patients. Ten windows from one recording, same
-   pipeline, how far does the top channel move? Until that is answered no
-   outcome number here is worth defending.
+4. ~~**Is the channel ranking stable?**~~ **Answered** (`docs/OUTCOME.md`).
+   Within a recording it is not: the same analysis gave AUC 0.82 on the first
+   minute and 0.71 on the whole run. Across *recordings* it is: the
+   per-patient answer holds over five different nights for 18/20 patients,
+   and pooling a patient's runs cuts the median candidate set from 2 channels
+   to 1 and the worst case from 24 to 5. So the quantity is a property of the
+   patient, not of the session — a minute is simply too short a unit.
 5. **Does any of it survive a second cohort?** Nothing here has been shown
    to generalise beyond one centre, one annotation protocol and one
    surgical team.

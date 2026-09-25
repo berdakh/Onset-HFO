@@ -90,6 +90,10 @@ class StabilityResult:
     detector: str = "rms"
     pipeline_version: str = PIPELINE_VERSION
     primary: tuple[str, str] = ("top_channel_resected", "fast_ripple")
+    #: Distinguishes one study's output directory from another's. The window
+    #: study and the across-runs study answer different questions and must not
+    #: overwrite each other's tables, which they did once.
+    label: str = "stability"
     windows: list[dict] = field(default_factory=list)
     #: Subjects analysed in every window, or the discrepancy if not. A curve
     #: computed over different cohorts at different points is not a curve, and
@@ -161,7 +165,12 @@ class StabilityResult:
                 "modal_channel": counts.index[0],
                 "modal_share": float(counts.iloc[0] / len(winners)),
             })
-        return pd.DataFrame(rows).sort_values(["source", "subject"]).reset_index(drop=True)
+        columns = ["subject", "source", "band", "n_windows", "n_distinct_channels",
+                   "modal_channel", "modal_share"]
+        if not rows:
+            return pd.DataFrame(columns=columns)
+        return (pd.DataFrame(rows, columns=columns)
+                .sort_values(["source", "subject"]).reset_index(drop=True))
 
     def decision_stability(self, band: str | None = None,
                            metric: str | None = None,
@@ -178,9 +187,11 @@ class StabilityResult:
         """
         band = band or self.primary[1]
         metric = metric or self.primary[0]
+        columns = ["subject", "source", "band", "metric", "n_windows",
+                   "n_distinct_answers", "share_inside", "spread", "stable"]
         frame = self.subjects
-        if not len(frame):
-            return pd.DataFrame()
+        if not len(frame) or "arm" not in frame.columns:
+            return pd.DataFrame(columns=columns)
         table = frame.query("arm == @arm and scope == 'reviewed' and band == @band")
         rows = []
         for (subject, source), group in table.groupby(["subject", "source"]):
@@ -195,7 +206,10 @@ class StabilityResult:
                 "spread": float(values.max() - values.min()),
                 "stable": bool(values.nunique() == 1),
             })
-        return pd.DataFrame(rows).sort_values(["source", "subject"]).reset_index(drop=True)
+        if not rows:  # an arm this study did not run
+            return pd.DataFrame(columns=columns)
+        return (pd.DataFrame(rows, columns=columns)
+                .sort_values(["source", "subject"]).reset_index(drop=True))
 
     def verdict(self) -> str:
         """One paragraph on whether the ranking is stable enough to use."""
@@ -260,7 +274,7 @@ class StabilityResult:
         return " | ".join(lines)
 
     def save(self, directory: str | Path | None = None) -> Path:
-        out = Path(directory or RESULTS_DIR) / f"stability_{self.dataset}"
+        out = Path(directory or RESULTS_DIR) / f"{self.label}_{self.dataset}"
         out.mkdir(parents=True, exist_ok=True)
         self.groups.to_csv(out / "groups.csv", index=False)
         self.subjects.to_csv(out / "subjects.csv", index=False)
@@ -711,7 +725,7 @@ def across_runs(runs_per_subject: int = DEFAULT_RUNS_PER_SUBJECT,
         groups=pd.concat(group_rows, ignore_index=True) if group_rows else pd.DataFrame(),
         subjects=subjects_df,
         channels=channels_df,
-        dataset=dataset, detector=detector,
+        dataset=dataset, detector=detector, label="runs",
         windows=[{"arm": "run", "subject": s, "run": r} for s, r in plan],
         cohort=_check_cohort(cohorts))
     if verbose and len(out.groups):

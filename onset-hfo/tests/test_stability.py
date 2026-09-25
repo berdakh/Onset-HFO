@@ -219,6 +219,26 @@ def test_verdict_names_both_arms(result):
     assert "0.82" in text and "0.71" in text and "disjoint" in text
 
 
+def test_views_of_an_arm_that_was_not_run_come_back_empty(result):
+    """A study that ran only windows must not crash when asked about runs.
+
+    The two studies write different arms, and ``save()`` asks for both. An
+    empty result with no columns raised a KeyError the first time this was
+    tried on real output.
+    """
+    assert result.decision_stability(arm="run").empty
+    assert result.spread(arm="run").empty
+    assert list(result.decision_stability(arm="run").columns)[:2] == ["subject", "source"]
+
+
+def test_two_studies_do_not_share_an_output_directory(tmp_path, result):
+    """The across-runs study overwrote the window study's tables exactly once."""
+    windows = result.save(tmp_path)
+    runs = StabilityResult(groups=result.groups, subjects=result.subjects,
+                           channels=result.channels, label="runs").save(tmp_path)
+    assert windows != runs
+
+
 # -- pooling a subject's runs ---------------------------------------------
 
 def _run_channels(rows):
