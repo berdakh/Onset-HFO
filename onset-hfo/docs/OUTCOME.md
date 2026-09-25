@@ -177,14 +177,107 @@ superseded by the table above.
 
 **"Which channel is busiest" is a fragile statistic on this much data.** It is
 an argmax over 6–65 channels whose rates have overlapping confidence
-intervals. `metrics.py` already refuses to rank channels whose Poisson
-intervals overlap when it reports rates; this metric does not, and it should.
-That is a specific, small piece of work.
+intervals. The next section measures exactly how fragile: across five disjoint
+minutes of the same recording, the experts' busiest channel is the same channel
+in only 7 of 20 patients.
 
 **A 20-patient study cannot distinguish these two results from each other.**
 `min_detectable_auc(13, 7)` = 0.85. Both 0.82 and 0.71 sit below that floor,
-so neither run had the power to establish its own number. The difference
-between them is noise of exactly the size this cohort produces.
+so neither run had the power to establish its own number. The window study
+below puts a size on that noise: five equally long windows of the same
+recordings give expert AUCs from 0.566 to 0.819.
+
+---
+
+## How stable is any of this? — the window study
+
+Everything above is an argmax over 6–65 channels whose Poisson rate intervals
+overlap. So the obvious question is whether it survives a change of analysis
+window. `onset-hfo stability` answers it in two arms — growing windows from
+the start of the run, and five **disjoint** 60-second windows that tile it —
+because a growing-window curve alone cannot tell convergence from drift.
+
+```bash
+python -m onset_hfo.cli stability     # 11 windows, ~90 min after the first fetch
+```
+
+![Window stability](img/window_stability.png)
+
+### The estimate settles, and 60 s was an excursion
+
+| window | expert AUC | p | rms AUC | p |
+|---|---|---|---|---|
+| 0–30 s | 0.632 | 0.36 | 0.650 | 0.30 |
+| **0–60 s** | **0.819** | **0.007** | 0.702 | 0.13 |
+| 0–120 s | 0.742 | 0.06 | 0.661 | 0.33 |
+| 0–180 s | 0.709 | 0.12 | 0.670 | 0.17 |
+| 0–240 s | 0.709 | 0.12 | 0.670 | 0.17 |
+| 0–300 s | 0.709 | 0.12 | 0.670 | 0.17 |
+
+Identical from 180 s onward — not merely close, identical, meaning no
+patient's answer changed in the last two minutes. The whole-run number is a
+settled estimate of *this recording*, and the 60-second result was an
+excursion rather than an undersampled version of it.
+
+One caveat the table shows in its own `n` columns (`curve.csv`): at 30 s the
+detector arm covers only 16 of 20 patients and at 60–120 s only 19, because
+the rest produce no fast-ripple detections in that little data. Its short-window
+points are computed over a different cohort and should not be read as part of
+the same curve. The expert arm is 20 patients at every window.
+
+### But which minute you pick matters
+
+Five equally long, non-overlapping windows of the same recordings, analysed
+identically:
+
+| source | AUC range | sd | p range |
+|---|---|---|---|
+| expert | 0.566 – 0.819 | 0.113 | **0.007 – 0.613** |
+| rms | 0.650 – 0.740 | 0.040 | 0.047 – 0.299 |
+
+The expert p-value swings from 0.007 to 0.61 depending on which minute is
+analysed. **The 0.007 that reached this project's README was the most
+favourable of five minutes**, and nothing short of running this could have
+revealed that.
+
+### Our detector is more stable than the expert markings
+
+The result this study was not designed to find:
+
+| | expert | rms |
+|---|---|---|
+| same busiest channel in all five windows | 7/20 | **12/20** |
+| same inside/outside answer in all five windows | 9/20 | **16/20** |
+| AUC spread across minutes | 0.25 | **0.09** |
+
+Some of that is deflation — a statistic nearer chance has less room to swing —
+but not a threefold difference in spread. A threshold-crossing detector run
+identically every minute is more reproducible than human marking, which is the
+thing automation is supposed to buy and the first evidence here that this
+pipeline buys it. Read it as *reproducibility*, not accuracy: the detector
+agrees with itself more than the experts agree with themselves, and it is
+still the experts who are closer to the outcome.
+
+For the detector the honest footnote is that six patients have fewer than five
+usable windows (no fast-ripple detections in some minute), so their "never
+moves" is over fewer comparisons. The decision figure, 16/20, uses whatever
+windows each patient has and reports the count in `decision_stability.csv`.
+
+### Channel identity is fragile; the decision on top of it is less so
+
+The two stability measures come apart — 7/20 against 9/20 for the experts,
+12/20 against 16/20 for us — and the gap is the useful part. When the two or
+three busiest channels are all inside the resection, or all outside it, the
+argmax can wander between them without the answer changing. Worst case is
+sub-12, where the experts' busiest channel is a *different channel in every
+one of the five windows*.
+
+**This argues for a design change.** A report from this pipeline should name a
+*set of candidate channels* — those whose rates are not distinguishable from
+the leader — rather than a winner. `metrics.rank_channels` already declines to
+order channels whose Poisson intervals overlap; `outcome._top_channel_resected`
+takes a bare argmax and does not. Making the outcome metric refuse a tie the
+way the rate table already does is the next piece of work, and it is small.
 
 ---
 
@@ -293,11 +386,9 @@ result.save()
 expert event count and ours — which is where to look first when a subject's
 number is surprising.
 
-**If you extend one thing, extend this.** Run the study at several window
-lengths and plot the AUC against window length. Everything above says that
-curve has not settled by 300 s, and it is the cheapest experiment left:
-the recordings are already cached after the first run, so every further window
-is compute only.
+**That experiment is now built**: `onset-hfo stability`, and
+:mod:`onset_hfo.stability` if you want to drive it from Python. The next one
+is combining a patient's several runs rather than lengthening a single one.
 
 ### Files written
 

@@ -231,11 +231,24 @@ def offline() -> bool:
     return os.environ.get(OFFLINE_ENV, "").strip().lower() not in ("", "0", "false", "no")
 
 
-def _http_get(url: str, byte_range: tuple[int, int] | None = None, timeout: float = 120.0) -> bytes:
+def _http_get(url: str, byte_range: tuple[int, int] | None = None, timeout: float = 120.0,
+              retries: int = 4) -> bytes:
     """GET a URL, optionally a byte range. Raises ``RuntimeError`` on failure.
 
     This is the only place in the package that reaches the network, which is
     what makes :data:`OFFLINE_ENV` a guarantee rather than a convention.
+
+    Transport-level failures are retried with exponential backoff, because
+    the alternative is worse than slow: callers that sweep a cohort
+    (:mod:`onset_hfo.benchmark`, :mod:`onset_hfo.outcome`,
+    :mod:`onset_hfo.stability`) skip a subject that fails and carry on, so a
+    single dropped TLS connection silently changes which patients an analysis
+    was computed over. One transient SSL EOF is how a 20-patient cohort
+    quietly becomes 19 in one window of a stability curve and nowhere else.
+
+    An HTTP status error (a genuinely missing file) is *not* retried -- it
+    will not succeed the second time, and pretending otherwise just makes the
+    failure slower.
     """
     if offline():
         raise OfflineError(
@@ -243,6 +256,23 @@ def _http_get(url: str, byte_range: tuple[int, int] | None = None, timeout: floa
     headers = {}
     if byte_range is not None:
         headers["Range"] = f"bytes={byte_range[0]}-{byte_range[1]}"
+    last: Exception | None = None
+    for attempt in range(retries + 1):
+        if attempt:
+            import time
+            time.sleep(min(2.0 ** attempt, 16.0))
+        try:
+            return _http_get_once(url, headers, timeout)
+        except (OfflineError, RuntimeError):
+            raise
+        except Exception as exc:  # transport-level: SSL EOF, reset, DNS, timeout
+            last = exc
+            print(f"[onset-hfo] retrying {url.rsplit('/', 1)[-1]} after "
+                  f"{type(exc).__name__} (attempt {attempt + 1}/{retries + 1})")
+    raise RuntimeError(f"{url} failed after {retries + 1} attempts: {last}") from last
+
+
+def _http_get_once(url: str, headers: dict, timeout: float) -> bytes:
     try:  # requests gives nicer proxy handling when it is installed
         import requests
 
