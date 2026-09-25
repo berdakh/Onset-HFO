@@ -166,9 +166,19 @@ a measurement, and channel-ranking stability across windows is now the most
 concrete open problem in this repository. The full accounting, both tables side
 by side, is in [`docs/OUTCOME.md`](docs/OUTCOME.md).
 
+**How unstable?** Now measured. Across five disjoint 60-second windows of the
+same recordings, the expert AUC spans 0.566–0.819 and its p-value 0.007–0.613 —
+the published 0.007 was the best of five minutes. The growing-window curve does
+settle from 180 s, so the whole-run number above is a settled estimate of one
+recording. And the result that was not designed for: **our detector is more
+stable across windows than the expert markings** (AUC spread 0.09 vs 0.25, same
+busiest channel in 12/20 patients vs 7/20). Figure and tables in
+[`docs/OUTCOME.md`](docs/OUTCOME.md).
+
 ```bash
 python -m onset_hfo.cli outcome            # whole runs, ~2.2 GB, ~25 minutes
 python -m onset_hfo.cli outcome --stop 60  # the first minute: a different answer
+python -m onset_hfo.cli stability          # 11 windows: does any of it hold?
 ```
 
 **Against expert HFO markings** — 20 subjects of [ds003498](https://openneuro.org/datasets/ds003498)
@@ -229,7 +239,7 @@ chance — see [`docs/EVALUATION.md`](docs/EVALUATION.md).
 | [`docs/ORCHESTRATION.md`](docs/ORCHESTRATION.md) | the tool contract, the evidence store, the S0–S3 ladder, and what verification costs |
 | [`docs/LOCALIZATION.md`](docs/LOCALIZATION.md) | the cohort, the learned per-contact model, calibration and conformal sets, and how much of it transfers |
 | [`docs/EVALUATION.md`](docs/EVALUATION.md) | what was measured, how, and what the numbers mean |
-| [`docs/OUTCOME.md`](docs/OUTCOME.md) | the surgical-outcome study: design, results, and what they cannot support |
+| [`docs/OUTCOME.md`](docs/OUTCOME.md) | the surgical-outcome study and the window-stability study: design, results, and what they cannot support |
 | [`docs/LIMITATIONS.md`](docs/LIMITATIONS.md) | what this must not be used for |
 | [`docs/GLOSSARY.md`](docs/GLOSSARY.md) | the clinical and signal-processing vocabulary, defined |
 | [`docs/ROADMAP.md`](docs/ROADMAP.md) | what to build next, in order, with the reasoning |
@@ -255,6 +265,9 @@ onset_hfo/            the pipeline
   store.py            the read-only view the agent is given
   cohort.py           clinician SOZ contacts, outcome and site from the archive
   batch.py            the pipeline across a cohort -> one labelled feature table
+  clinical.py         the resected zone and outcome sidecars -> bipolar channels
+  outcome.py          does the HFO map point at the tissue that was removed?
+  stability.py        does any of that survive a change of analysis window?
   models.py           the learned per-contact model; within-subject / LOPO / cross-site
   uncertainty.py      calibration, split conformal sets, exchangeability stress test
   learn.py            python -m onset_hfo.learn ...

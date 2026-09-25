@@ -31,7 +31,9 @@ Read in this order:
 5. [**OUTCOME.md**](OUTCOME.md) — the one test whose reference standard is
    not another algorithm: did the HFO map point at the tissue whose removal
    made the patient seizure-free? Includes the expert positive control that
-   tells an underpowered null apart from a detector that does not work.
+   tells an underpowered null apart from a detector that does not work, and
+   the window study that measures whether any of it survives looking at a
+   different minute of the same recording.
 6. [**AGENT.md**](AGENT.md) — how a language model is allowed near clinical
    data at all: the tools, the guards, and the threat model.
 7. [**ORCHESTRATION.md**](ORCHESTRATION.md) — the other direction: the model
@@ -66,6 +68,7 @@ Read in this order:
 | What does the report contain? | [`onset_hfo/report.py`](../onset_hfo/report.py) |
 | Which contacts were resected, and how is that mapped to channels? | [`onset_hfo/clinical.py`](../onset_hfo/clinical.py) |
 | How is the outcome study computed, and what are its statistics? | [`onset_hfo/outcome.py`](../onset_hfo/outcome.py) |
+| Does a result survive a change of analysis window? | [`onset_hfo/stability.py`](../onset_hfo/stability.py) |
 
 ## A note on how this repository is written
 

@@ -270,7 +270,7 @@ every answer's citations resolving to the window the reader can see. Reuse
 
 ---
 
-## 10. Is the channel ranking stable? — *now the top item*
+## 10. Is the channel ranking stable? — *measured; step 3 remains*
 
 **Why.** The outcome study's conclusion changed between a 60-second window and
 a 300-second one (§2), moving on two patients out of twenty. Every clinical
@@ -279,25 +279,35 @@ ranking that moves when the window moves undermines all of them — and unlike
 most items here, this one is cheap and entirely offline once the recordings are
 cached.
 
-**What to do, in order.**
+**Steps 1 and 2 are done** — `onset_hfo/stability.py`, `onset-hfo stability`,
+and `docs/OUTCOME.md` has the figure and the tables. What they found:
 
-1. **Window-length curve.** Run `outcome_study` at 30, 60, 120, 180, 240, 300 s
-   and plot AUC against window length, per source and band. If it has not
-   settled by 300 s, say so; the archive has 1–6 runs per subject, so the next
-   step is combining runs rather than lengthening one.
-2. **Top-k stability within a recording.** Ten non-overlapping windows from the
-   same run, same pipeline: how far does the top-5 move? This was already in
-   the open questions below as "the cheapest experiment in the list and
-   possibly the most informative". It is no longer optional.
-3. **Refuse to rank tied channels.** `metrics.rank_channels` already knows how
-   to decline when Poisson intervals overlap. `outcome._top_channel_resected`
-   and `_top_k_resected` take an argmax with no such check. Give them one, and
-   report the fraction of patients for whom the busiest channel is *not*
-   distinguishable from the runner-up — which on this cohort may well be most
-   of them.
+* The growing-window curve **settles from 180 s** (identical AUC at 180, 240
+  and 300 s), so the whole-run number is a settled estimate of one recording
+  and the 60-second result was an excursion.
+* Across five **disjoint** 60 s windows the expert AUC spans 0.566–0.819 and
+  its p-value 0.007–0.613. The published 0.007 was the best of five minutes.
+* **Our detector is more stable than the expert markings** — AUC spread 0.09
+  against 0.25, same busiest channel in 12/20 patients against 7/20, same
+  inside/outside answer in 16/20 against 9/20. Partly deflation, not entirely.
+* Channel identity and the decision built on it come apart (7/20 vs 9/20 for
+  the experts), because the top few channels are often all inside or all
+  outside the resection.
 
-**Touches.** `onset_hfo/outcome.py`, `onset_hfo/metrics.py`, `docs/OUTCOME.md`,
-a new figure.
+**Step 3 is what remains, and the last bullet is the argument for it.**
+`metrics.rank_channels` already declines to order channels whose Poisson
+intervals overlap. `outcome._top_channel_resected` and `_top_k_resected` take
+an argmax with no such check. Give them one; report a *set* of candidate
+channels rather than a winner, plus the fraction of patients for whom the
+busiest channel is not distinguishable from the runner-up. Then re-run the
+outcome study and see whether refusing to guess costs anything.
+
+**Step 4, newly implied.** The curve settles within one run but a patient has
+1–6 runs in the archive, recorded on different nights. Combining them is now
+the open question the window study could not answer.
+
+**Touches.** `onset_hfo/outcome.py`, `onset_hfo/metrics.py`,
+`onset_hfo/stability.py`, `docs/OUTCOME.md`.
 
 ---
 

@@ -149,6 +149,37 @@ class StabilityResult:
             })
         return pd.DataFrame(rows).sort_values(["source", "subject"]).reset_index(drop=True)
 
+    def decision_stability(self, band: str | None = None) -> pd.DataFrame:
+        """Per patient: does the *metric* give the same answer in every window?
+
+        :meth:`top_channel_stability` asks whether the same channel wins.
+        This asks the question that actually reaches a clinician: whether the
+        winner was inside the resection. The two come apart, and the gap
+        between them is the useful part -- when the two or three busiest
+        channels are all inside the resection (or all outside it), the argmax
+        can move freely between them without the answer changing. Channel
+        identity is the fragile thing; the decision built on it is less so.
+        """
+        band = band or self.primary[1]
+        metric = self.primary[0]
+        frame = self.subjects
+        if not len(frame):
+            return pd.DataFrame()
+        table = frame.query("arm == 'disjoint' and scope == 'reviewed' and band == @band")
+        rows = []
+        for (subject, source), group in table.groupby(["subject", "source"]):
+            values = group[metric].dropna()
+            if not len(values):
+                continue
+            rows.append({
+                "subject": subject, "source": source, "band": band,
+                "n_windows": int(len(values)),
+                "n_distinct_answers": int(values.nunique()),
+                "share_inside": float(values.mean()),
+                "stable": bool(values.nunique() == 1),
+            })
+        return pd.DataFrame(rows).sort_values(["source", "subject"]).reset_index(drop=True)
+
     def verdict(self) -> str:
         """One paragraph on whether the ranking is stable enough to use."""
         metric, band = self.primary
@@ -168,11 +199,18 @@ class StabilityResult:
         stability = self.top_channel_stability()
         if len(stability):
             for source, group in stability.groupby("source"):
-                same = float((group["modal_share"] == 1.0).mean())
+                same = int((group["modal_share"] == 1.0).sum())
                 lines.append(
                     f"{source}: the busiest channel is the same in every window for "
-                    f"{same:.0%} of patients (median modal share "
+                    f"{same}/{len(group)} patients (median modal share "
                     f"{group['modal_share'].median():.2f})")
+        decision = self.decision_stability()
+        if len(decision):
+            for source, group in decision.groupby("source"):
+                stable = int(group["stable"].sum())
+                lines.append(
+                    f"{source}: the inside/outside ANSWER is the same in every window "
+                    f"for {stable}/{len(group)} patients")
         return " | ".join(lines)
 
     def save(self, directory: str | Path | None = None) -> Path:
@@ -185,6 +223,10 @@ class StabilityResult:
         stability = self.top_channel_stability()
         if len(stability):
             stability.to_csv(out / "top_channel_stability.csv", index=False)
+        decision = self.decision_stability()
+        if len(decision):
+            decision.to_csv(out / "decision_stability.csv", index=False)
+            self.spread().to_csv(out / "spread.csv", index=False)
         (out / "run.json").write_text(json.dumps({
             "dataset": self.dataset, "detector": self.detector,
             "pipeline_version": self.pipeline_version,
@@ -364,32 +406,35 @@ def plot_stability(result: StabilityResult, path: str | Path | None = None, dpi:
     ax.set_ylim(0, 1.05)
     ax.legend(frameon=False, fontsize=9)
 
-    # -- C: does the argmax hold? ------------------------------------------
+    # -- C: does the argmax hold, and does the answer? ---------------------
     ax = axes[2]
-    stability = result.top_channel_stability()
-    if len(stability):
-        sources = list(stability["source"].unique())
-        # Bins are the share of windows the modal channel won. The top bin is
-        # closed on the right so "the same channel every time" (share 1.0)
-        # lands in it rather than falling off the end.
-        edges = np.array([0.0, 0.2, 0.4, 0.6, 0.8, 1.0000001])
-        centres = (edges[:-1] + np.array([0.2, 0.2, 0.2, 0.2, 0.2]) / 2.0)
-        width = 0.16 / max(len(sources), 1)
+    identity = result.top_channel_stability()
+    decision = result.decision_stability()
+    if len(identity) and len(decision):
+        sources = list(identity["source"].unique())
+        groups = ["same top channel\nin every window", "same inside/outside\nanswer in every window"]
+        width = 0.36
+        positions = np.arange(len(groups))
         for i, source in enumerate(sources):
-            share = stability.loc[stability["source"] == source, "modal_share"]
-            counts, _ = np.histogram(share, bins=edges)
+            same_channel = int((identity.loc[identity["source"] == source,
+                                             "modal_share"] == 1.0).sum())
+            same_answer = int(decision.loc[decision["source"] == source, "stable"].sum())
+            total = int((identity["source"] == source).sum())
             offset = (i - (len(sources) - 1) / 2.0) * width
-            ax.bar(centres + offset, counts, width=width,
-                   color=colors.get(source, PALETTE["series_3"]), label=source)
-        ax.set_xticks(centres)
-        ax.set_xticklabels(["0–0.2", "0.2–0.4", "0.4–0.6", "0.6–0.8", "0.8–1.0"],
-                           fontsize=8)
-        ax.set_xlabel("share of windows won by the patient's modal top channel")
+            bars = ax.bar(positions + offset, [same_channel, same_answer], width=width,
+                          color=colors.get(source, PALETTE["series_3"]), label=source)
+            for bar, value in zip(bars, [same_channel, same_answer], strict=True):
+                ax.text(bar.get_x() + bar.get_width() / 2, value + 0.25,
+                        f"{value}/{total}", ha="center", va="bottom", fontsize=8.5,
+                        color=PALETTE["ink_soft"])
+        ax.set_xticks(positions)
+        ax.set_xticklabels(groups, fontsize=8.5)
         ax.set_ylabel("patients")
-        ax.set_title(f"C  Is the busiest channel the same channel?\n"
-                     f"     ({DISJOINT_LENGTH:g} s windows; 1.0 = never moves)",
+        ax.set_ylim(0, max(len(identity["subject"].unique()) + 3, 5))
+        ax.set_title(f"C  What survives a change of minute?\n"
+                     f"     (across disjoint {DISJOINT_LENGTH:g} s windows)",
                      fontsize=10, loc="left", color=PALETTE["ink"])
-        ax.legend(frameon=False, fontsize=9)
+        ax.legend(frameon=False, fontsize=9, loc="upper left")
     fig.tight_layout()
     if path is not None:
         path = Path(path)
