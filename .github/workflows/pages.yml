@@ -1,0 +1,48 @@
+# Publish the project website (the site/ directory) to GitHub Pages.
+#
+# The site is deployed by Actions rather than from a branch folder, because
+# "deploy from a branch" can only serve the repository root or a root-level
+# /docs, and this repository's documentation lives at onset-hfo/docs/ while the
+# website is a separate, much smaller thing in site/.
+#
+# configure-pages runs with enablement: true, so the first run of this workflow
+# tries to turn Pages on by itself. If your repository settings do not allow
+# that, the step fails with "Get Pages site failed" and the fix is one click:
+# Settings -> Pages -> Source -> GitHub Actions, then re-run the workflow.
+# After that, every push to master that touches site/ republishes.
+name: pages
+
+on:
+  push:
+    branches: [master]
+    paths: ["site/**", ".github/workflows/pages.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Never let two deployments race; let a running one finish.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check the site has an entry point
+        run: test -f site/index.html
+      - uses: actions/configure-pages@v5
+        with:
+          enablement: true
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+      - id: deployment
+        uses: actions/deploy-pages@v4
