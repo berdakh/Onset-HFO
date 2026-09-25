@@ -18,6 +18,7 @@ import json
 import sys
 from pathlib import Path
 
+from onset_hfo.benchmark import DEFAULT_THRESHOLDS
 from onset_hfo.config import (
     DEFAULT_RUN,
     DEFAULT_SUBJECT,
@@ -26,6 +27,7 @@ from onset_hfo.config import (
     DEFAULT_TSTOP,
     PIPELINE_VERSION,
     RESULTS_DIR,
+    THRESHOLDS,
     PipelineConfig,
     ensure_dirs,
 )
@@ -45,6 +47,18 @@ def _cmd_run(args: argparse.Namespace) -> int:
 
     cfg = PipelineConfig()
     cfg.top_k = args.top_k
+    if args.threshold:
+        value = THRESHOLDS.get(args.threshold)
+        if value is None:
+            try:
+                value = float(args.threshold)
+            except ValueError:
+                print(f"[onset-hfo] --threshold must be a number or one of: "
+                      f"{', '.join(THRESHOLDS)}")
+                return 2
+        cfg.rms.threshold_sd = value
+        cfg.line_length.threshold_sd = value
+        print(f"[onset-hfo] detection threshold {value:g} SD ({args.threshold})")
     result = run_pipeline(recording, cfg, with_spikes=not args.no_spikes,
                           save_to=args.out or RESULTS_DIR)
     out_dir = Path(args.out or RESULTS_DIR) / \
@@ -104,6 +118,34 @@ def _cmd_evaluate(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_benchmark(args: argparse.Namespace) -> int:
+    """Score the detectors against expert HFO markings on a real cohort."""
+    from onset_hfo.benchmark import benchmark_cohort
+
+    ensure_dirs()
+    result = benchmark_cohort(
+        subjects=args.subjects, n_subjects=args.n_subjects, dataset=args.dataset,
+        run=args.run, t_start=args.start, t_stop=args.stop,
+        thresholds=tuple(args.thresholds), detectors=tuple(args.detectors),
+        bands=tuple(args.bands))
+    if not len(result.scores):
+        print("[onset-hfo] nothing scored: no subject produced expert markings")
+        return 1
+    for band in args.bands:
+        table = result.summary(band)
+        if not len(table):
+            continue
+        print(f"\n[onset-hfo] {band} band, cohort means over "
+              f"{result.subjects['subject'].nunique()} subjects "
+              f"({args.stop - args.start:g} s each):")
+        print(table.to_string(index=False))
+    print("\n[onset-hfo] operating point the data prefers:")
+    print(f"   by F1:              {result.best_threshold(args.bands[0], 'f1')}")
+    print(f"   by rank agreement:  {result.best_threshold(args.bands[0], 'rank')}")
+    result.save(args.out)
+    return 0
+
+
 def _cmd_runs(args: argparse.Namespace) -> int:
     from onset_hfo.datasets import list_runs
 
@@ -140,6 +182,9 @@ def build_parser() -> argparse.ArgumentParser:
                      help="length of the synthetic recording, seconds")
     run.add_argument("--seed", type=int, default=7, help="synthetic recording seed")
     run.add_argument("--top-k", type=int, default=5)
+    run.add_argument("--threshold", default=None, metavar="SD|PRESET",
+                     help="detection threshold in robust SDs, or a measured preset: "
+                          + ", ".join(f"{k} ({v:g})" for k, v in THRESHOLDS.items()))
     run.add_argument("--no-spikes", action="store_true", help="skip the discharge detector")
     run.add_argument("--figures", action="store_true", help="also render the standard figures")
     run.add_argument("--out", default=None, help=f"output directory (default: {RESULTS_DIR})")
@@ -151,6 +196,27 @@ def build_parser() -> argparse.ArgumentParser:
     ev.add_argument("--out", default=None, help="write per-seed scores to this CSV")
     ev.add_argument("--verbose", action="store_true")
     ev.set_defaults(func=_cmd_evaluate)
+
+    bench = sub.add_parser(
+        "benchmark",
+        help="score the detectors against expert HFO markings (ds003498)")
+    bench.add_argument("--dataset", default="ds003498",
+                       help="dataset with expert markings (default: ds003498)")
+    bench.add_argument("--subjects", nargs="+", default=None,
+                       help="subject labels; default: every subject in the dataset")
+    bench.add_argument("--n-subjects", type=int, default=None,
+                       help="use only the first N subjects (a quick look)")
+    bench.add_argument("--run", default="01")
+    bench.add_argument("--start", type=float, default=0.0)
+    bench.add_argument("--stop", type=float, default=60.0,
+                       help="seconds of each recording to score (default 60)")
+    bench.add_argument("--thresholds", type=float, nargs="+", default=list(DEFAULT_THRESHOLDS),
+                       help="detection thresholds to sweep, in robust SDs")
+    bench.add_argument("--detectors", nargs="+", default=["rms", "line_length"])
+    bench.add_argument("--bands", nargs="+", default=["ripple"],
+                       choices=["ripple", "fast_ripple"])
+    bench.add_argument("--out", default=None, help=f"output directory (default: {RESULTS_DIR})")
+    bench.set_defaults(func=_cmd_benchmark)
 
     runs = sub.add_parser("runs", help="list the runs available for a subject in the archive")
     runs.add_argument("--subject", default=DEFAULT_SUBJECT)

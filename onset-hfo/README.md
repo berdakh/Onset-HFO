@@ -131,7 +131,29 @@ And, in the other direction — the agent deciding what the pipeline measures:
 
 ## Results you can check
 
-On **synthetic data with known truth** (three seeds, 60 s each, `python -m onset_hfo.cli evaluate`):
+**Against expert HFO markings** — 20 subjects of [ds003498](https://openneuro.org/datasets/ds003498)
+(Zurich interictal slow-wave sleep, 2000 Hz), 41,187 expert-marked events,
+scored only on the channels the annotators reviewed:
+
+| band | detector | threshold | precision | recall | F1 | channel-rank ρ |
+|---|---|---|---|---|---|---|
+| ripple | RMS | 1.5 SD | 0.43 | 0.48 | **0.42** | 0.59 |
+| ripple | RMS | 2.0 SD | 0.51 | 0.38 | 0.40 | **0.66** |
+| ripple | RMS | 5.0 SD *(default)* | 0.59 | 0.12 | 0.17 | 0.37 |
+| fast ripple | RMS | 3.5 SD | 0.33 | 0.29 | 0.30 | 0.59 |
+
+Read that as **agreement, not accuracy**: the reference is the validated
+output of another detector, so an event we find that it never proposed counts
+against us either way. The useful sentence is *we reproduce about half of a
+published detector's validated events and rank the same channels active at
+ρ ≈ 0.66*.
+
+It also shows the shipped default is wrong for this task — 5.0 SD comes from
+the ictal literature and finds 12% of interictal markings. `--threshold
+interictal-agreement` (2.0 SD) is the measured operating point.
+
+**Against synthetic ground truth**, where every event is known by construction
+(three seeds, `python -m onset_hfo.cli evaluate`):
 
 | detector | precision | recall | F1 |
 |---|---|---|---|
@@ -139,109 +161,16 @@ On **synthetic data with known truth** (three seeds, 60 s each, `python -m onset
 | line length (ripples) | 0.957 ± 0.017 | 0.550 ± 0.078 | 0.697 |
 | interictal discharges | 0.998 ± 0.004 | 0.844 ± 0.037 | 0.914 |
 
-Artifact rejection is what earns the precision: **before** it, the RMS
-detector scores precision 0.63 (the false positives are filter ringing from
-large transients); **after** it, 0.97, at a cost of about one point of recall.
+Artifact rejection is what earns that precision: **before** it, the RMS
+detector scores 0.63 (the false positives are filter ringing from large
+transients); **after** it, 0.97, at a cost of about one point of recall.
 
-On the **real recording** (`sub-pt01`, 60 s around a marked seizure, 71
-bipolar channels), the pipeline runs in about 7 seconds, reports the leading
-channels with their confidence intervals, names seven channels the two
-detectors rank very differently, and shows ripple rates rising from 0 before
-the marked onset to ~145/min during the seizure. It also reports, because it is true,
-that its top-ranked channels do **not** overlap the contacts the clinician
-named at onset more than chance would predict —
-see [`docs/EVALUATION.md`](docs/EVALUATION.md) for why that is expected and
-what it does and does not mean.
-
-### What a learned model buys, and what it does not
-
-22 subjects from the public archive, 1466 channels, 301 labelled SOZ
-(`python -m onset_hfo.learn evaluate`):
-
-| protocol | AUPRC | lift over prevalence | precision@5 |
-|---|---|---|---|
-| line length rate, **untrained** | 0.467 | 2.28× | 0.509 |
-| leave-one-patient-out, boosted | **0.480** | 2.34× | 0.555 |
-| leave-one-**site**-out, boosted | 0.476 | 2.32× | 0.536 |
-| **within-subject** (a ceiling, not deployable) | **0.709** | **3.45×** | 0.636 |
-
-The learned model barely beats the rate it was built from — thirteen features
-and a cross-validation harness buy about one AUPRC point. The ceiling is far
-above both: the features *are* separable inside a recording, and most of that
-does not survive the move to a new patient. **That gap is the result.** Changing
-hospital costs almost nothing on top of changing patient, which says the
-normalisation problem is at the patient level.
-
-The ceiling is not reachable on its own — it needs labels you do not have. But
-a cheaper version of it is (`python -m onset_hfo.learn personalize`): let the
-clinician label a few contacts first, then predict the rest.
-
-| contacts the clinician labels | % of the implantation | AUPRC | gap to the ceiling closed |
-|---|---|---|---|
-| 0 *(= leave-one-patient-out)* | 0% | 0.455 | 0% |
-| 2 | 3% | 0.490 | 17% |
-| **5** | **7.5%** | **0.531** | **38%** |
-| 10 | 15% | 0.555 | 50% |
-
-Five contacts — under a tenth of the electrodes — recovers well over a third
-of what is lost moving to a new patient. And it matters *which* five
-(`python -m onset_hfo.learn acquire`): choosing beats a random draw on all
-five seeds at two and five labels, most at the tightest budget (+0.062 AUPRC
-at two labels, half that by ten). **Uncertainty sampling — the textbook
-active-learning strategy — loses to random.** With five labels and 20%
-prevalence what you are short of is positives, and the contacts a model is
-unsure about are mostly ambiguous negatives. The strategy that needs no model
-at all — label the highest ripple rates — is the best of them.
-
-### Trying to break it
-
-`--falsify` attacks the system five ways, each with its expectation stated
-before it runs. On `sub-pt01`: **5/5 pass**. One of them did not, at first —
-given a simulation with no epileptic contacts at all, the pipeline ranked a
-channel at 6/min and nothing in its output said the recording was empty. There
-was no null hypothesis. The fix was not a threshold but a missing statistic:
-a leader must be distinguishable from the *median* channel's confidence
-interval, or the report says so. See
-[`docs/ORCHESTRATION.md`](docs/ORCHESTRATION.md) §6b.
-
-### And what the orchestration buys, honestly
-
-Four configurations over the *same* analyzers on `sub-pt01`
-(`python -m onset_agent.orchestrate ... --score`):
-
-| rung | tool calls | channels re-tested | hits @ 5 vs clinician SOZ | chance | p |
-|---|---|---|---|---|---|
-| S0 fixed pipeline | 5 | 0 | 0 | 1.03 | 1.00 |
-| S1 single-shot | 4 | 0 | 0 | 0.84 | 1.00 |
-| S2 re-planning | 7 | 2 | 0 | 0.84 | 1.00 |
-| S3 + verifier | 7 | 2 | 0 | 0.84 | 1.00 |
-
-Re-planning re-ordered the top five, and that re-ordering means nothing: the
-leading channels sit between 70 and 83 events/min with heavily overlapping
-intervals, and `PST2-PST3` *passed* its stricter-threshold check (83 → 79/min).
-On synthetic data with implanted artifacts the same mechanism does bite — a
-channel falls from 54 to 30/min and drops below one it had led — which is
-exactly the difference between a mechanism that works and a mechanism that
-helped here. Every number in the table comes from the deterministic scripted
-planner, which is the control, not the result.
-
-## What it looks like
-
-One detection, with the evidence that decides whether it is real — the
-wideband signal, the band-passed signal, and the event's spectrum against the
-recording's own 1/f background:
-
-![An accepted event on a real recording](docs/img/real_example_event.png)
-
-Ranked channels with Poisson confidence intervals (overlapping intervals mean
-"tied", not "ranked"), the rate across the marked seizure, and the two
-detectors plotted against each other with the disagreements highlighted:
-
-| | |
-|---|---|
-| ![Channel rates](docs/img/real_rates_rms.png) | ![Rate over time](docs/img/real_rate_timecourse.png) |
-
-![Detector comparison](docs/img/real_detector_comparison.png)
+On the **ictal recording** (`sub-pt01`, 60 s, 71 bipolar channels) the
+pipeline runs in about 7 seconds, names seven channels the two detectors rank
+very differently, and shows ripple rates going from 0 before the marked onset
+to ~145/min during the seizure. It also reports, because it is true, that its
+top-ranked channels do not overlap the contacts the clinician named more than
+chance — see [`docs/EVALUATION.md`](docs/EVALUATION.md).
 
 ## Documentation
 

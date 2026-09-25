@@ -77,6 +77,13 @@ footer { border-top: 1px solid var(--line); margin-top: 3.5em; padding: 2em 0 4e
 footer a { color: var(--ink-2); }
 .linkrow { display: flex; flex-wrap: wrap; gap: .5em 1.4em; margin: .8em 0 0; font-size: .95rem; }
 @media (max-width: 520px) { header { padding-top: 40px; } }
+/* A six-column results table cannot fit a phone. Let the table scroll inside
+   its own box rather than making the whole page scroll sideways, which breaks
+   every other section too. */
+@media (max-width: 620px) {
+  table { display: block; overflow-x: auto; white-space: nowrap; }
+  table::after { content: ""; display: block; }
+}
 </style>
 </head>
 <body>
@@ -177,22 +184,53 @@ pytest -q                                             # 58 tests, offline</code>
 
 <h2>What it measures</h2>
 <p>
-  On <strong>synthetic data with known truth</strong> (three recordings, 60&nbsp;s each,
-  implanted ripples, discharges and artifacts):
+  Scored against <strong>expert HFO markings</strong> on 20 subjects of the
+  Zurich interictal sleep dataset &mdash; 41,187 marked events, counted only on
+  the channels the annotators actually reviewed:
+</p>
+<table>
+  <thead><tr><th>Band</th><th>Threshold</th><th class="num">Precision</th><th class="num">Recall</th><th class="num">F1</th><th class="num">Channel-rank &rho;</th></tr></thead>
+  <tbody>
+    <tr><td>ripple</td><td>1.5 SD</td><td class="num">0.43</td><td class="num">0.48</td><td class="num">0.42</td><td class="num">0.59</td></tr>
+    <tr><td>ripple</td><td>2.0 SD</td><td class="num">0.51</td><td class="num">0.38</td><td class="num">0.40</td><td class="num">0.66</td></tr>
+    <tr><td>fast ripple</td><td>3.5 SD</td><td class="num">0.33</td><td class="num">0.29</td><td class="num">0.30</td><td class="num">0.59</td></tr>
+  </tbody>
+</table>
+<div class="note">
+  <p>
+    <strong>That is agreement, not accuracy.</strong> The reference is the
+    validated output of another detector, not a census of every oscillation, so
+    an event we find that it never proposed counts against us whether or not it
+    is real. The defensible sentence: <em>we reproduce about half of a published
+    detector's validated events, and rank the same channels as active at
+    &rho; &asymp; 0.66.</em>
+  </p>
+</div>
+<p>
+  The same benchmark showed that this pipeline's own default threshold &mdash;
+  5 robust SDs, inherited from the ictal literature &mdash; finds only 12% of
+  interictal markings and ranks channels barely above chance. The measured
+  operating point is 1.5&ndash;2.0 SD, and it now ships as a named preset. A
+  default nobody had measured was quietly wrong for the clinically relevant
+  setting; catching that is what this project is for.
+</p>
+<p>
+  On <strong>synthetic data with known truth</strong> (three recordings, 60&nbsp;s
+  each, implanted ripples, discharges and artifacts):
 </p>
 <table>
   <thead><tr><th>Detector</th><th class="num">Precision</th><th class="num">Recall</th><th class="num">F1</th></tr></thead>
   <tbody>
-    <tr><td>RMS energy (ripples)</td><td class="num">0.956 ± 0.017</td><td class="num">0.528 ± 0.073</td><td class="num">0.679</td></tr>
-    <tr><td>Line length (ripples)</td><td class="num">0.957 ± 0.017</td><td class="num">0.550 ± 0.078</td><td class="num">0.697</td></tr>
-    <tr><td>Interictal discharges</td><td class="num">0.998 ± 0.004</td><td class="num">0.844 ± 0.037</td><td class="num">0.914</td></tr>
+    <tr><td>RMS energy (ripples)</td><td class="num">0.956 &plusmn; 0.017</td><td class="num">0.528 &plusmn; 0.073</td><td class="num">0.679</td></tr>
+    <tr><td>Line length (ripples)</td><td class="num">0.957 &plusmn; 0.017</td><td class="num">0.550 &plusmn; 0.078</td><td class="num">0.697</td></tr>
+    <tr><td>Interictal discharges</td><td class="num">0.998 &plusmn; 0.004</td><td class="num">0.844 &plusmn; 0.037</td><td class="num">0.914</td></tr>
   </tbody>
 </table>
 <p>
   Artifact rejection is what earns that precision: before it, the energy detector
-  scores <strong>0.63</strong> — nearly all of its false positives are large transients
-  ringing through the band-pass — and after it, <strong>0.97</strong>, for about one
-  point of recall.
+  scores <strong>0.63</strong> &mdash; nearly all of its false positives are large
+  transients ringing through the band-pass &mdash; and after it, <strong>0.97</strong>,
+  for about one point of recall.
 </p>
 
 <figure>

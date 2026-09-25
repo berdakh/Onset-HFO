@@ -34,6 +34,14 @@ definition; this file explains the *thinking*.
 | Bad channels | drop everything the dataset flags `status = bad` | white matter, CSF, outside the brain, or noisy |
 | High-pass | 1 Hz, zero-phase FIR | removes drift without touching anything we measure |
 | Notch | mains frequency and harmonics below 0.9 × Nyquist, **2 Hz wide**, zero-phase | 180 Hz and 240 Hz sit *inside* the ripple band; a wide notch would remove real signal along with the interference |
+
+The mains frequency is **taken from the dataset**, not configured: 60 Hz for
+the US recordings in `ds003029`, 50 Hz for Zurich in `ds003498`. Setting
+`PreprocessConfig.line_freq` overrides it deliberately; leaving it `None`
+means "use the recording's". `Prepared.line_freq` then carries the value that
+was actually filtered, so no later stage has to re-derive it — a quality
+check that measures 60 Hz on a recording notched at 50 Hz is worse than no
+check at all.
 | Montage | bipolar: neighbouring contacts on the same electrode | a common reference shares its noise with every channel, producing "HFOs" that appear everywhere simultaneously |
 
 **Zero-phase filtering** (forward–backward) is used everywhere because a

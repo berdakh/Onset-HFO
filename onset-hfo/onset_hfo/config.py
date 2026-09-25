@@ -45,29 +45,84 @@ def ensure_dirs() -> None:
 
 @dataclass(frozen=True)
 class DatasetSpec:
-    """Identity and access details of the public dataset.
+    """Identity, access details and quirks of one public dataset.
 
-    We deliberately pin ONE dataset for the prototype. It is public, CC0, in
-    BIDS-iEEG format, and it can be read in byte ranges over plain HTTPS, which
-    is what lets a notebook download 60 seconds instead of 10 hours.
+    Two datasets are wired in. They answer different questions, and the
+    difference matters more than any parameter in this file:
+
+    ``ds003029`` is *ictal* -- recordings around seizures, with clinician
+    onset markers but no HFO annotations. You can measure rates and detector
+    agreement on it; you cannot measure precision or recall.
+
+    ``ds003498`` is *interictal slow-wave sleep* -- the setting the clinical
+    HFO literature actually uses -- and it ships expert-validated HFO events
+    per channel. That is what makes a real precision/recall number possible.
+
+    Attributes that exist because datasets differ in ways that break analyses
+    silently: ``line_freq`` (50 Hz in Zurich, 60 Hz in the US -- notching the
+    wrong one leaves the interference in and carves a hole where there was
+    none) and the BIDS entities each archive uses in its filenames.
     """
 
-    dataset_id: str = "ds003029"
-    name: str = "Epilepsy-iEEG-Multicenter-Dataset (Fragility multicenter study)"
-    doi: str = "10.18112/openneuro.ds003029.v1.0.3"
+    dataset_id: str
+    name: str
+    doi: str
+    citation: str
+    #: Mains frequency at the recording site. Wrong value = wrong notch.
+    line_freq: float = 60.0
+    #: BIDS entities this dataset's filenames carry. ``None`` means absent.
+    session: str | None = None
+    task: str | None = None
+    acq: str | None = None
+    default_run: str = "01"
+    #: True when ``*_events.tsv`` carries expert HFO markings.
+    has_hfo_annotations: bool = False
     license: str = "CC0"
-    citation: str = (
-        "Li A, Inati S, Zaghloul K, Crone N, Anderson W, Johnson E, Cajigas I, Brusko D, "
-        "Jagid J, Claudio A, Kanner A, Hopp J, Chen S, Haagensen J, Sarma S. "
-        "Epilepsy-iEEG-Multicenter-Dataset. OpenNeuro (2021). doi:10.18112/openneuro.ds003029.v1.0.3 "
-        "-- the archive asks that work using it also cite 'Neural fragility as an EEG marker "
-        "of the seizure onset zone', doi:10.1101/862797 (Nature Neuroscience, 2023)."
-    )
-    #: Public S3 mirror of the OpenNeuro bucket (no credentials, supports Range requests).
+    #: Public S3 mirror of the OpenNeuro bucket (no credentials, Range requests).
     base_url: str = "https://s3.amazonaws.com/openneuro.org"
 
 
-DATASET = DatasetSpec()
+DATASETS: dict[str, DatasetSpec] = {
+    "ds003029": DatasetSpec(
+        dataset_id="ds003029",
+        name="Epilepsy-iEEG-Multicenter-Dataset (Fragility multicenter study)",
+        doi="10.18112/openneuro.ds003029.v1.0.3",
+        citation=(
+            "Li A, Inati S, Zaghloul K, Crone N, Anderson W, Johnson E, Cajigas I, Brusko D, "
+            "Jagid J, Claudio A, Kanner A, Hopp J, Chen S, Haagensen J, Sarma S. "
+            "Epilepsy-iEEG-Multicenter-Dataset. OpenNeuro (2021). "
+            "doi:10.18112/openneuro.ds003029.v1.0.3 -- the archive asks that work using it "
+            "also cite 'Neural fragility as an EEG marker of the seizure onset zone', "
+            "doi:10.1101/862797 (Nature Neuroscience, 2023)."
+        ),
+        line_freq=60.0,
+        session="ses-presurgery",
+        task="ictal",
+        acq="ecog",
+        default_run="01",
+        has_hfo_annotations=False,
+    ),
+    "ds003498": DatasetSpec(
+        dataset_id="ds003498",
+        name="Zurich iEEG HFO dataset: interictal slow-wave sleep with expert HFO markings",
+        doi="10.18112/openneuro.ds003498.v1.0.1",
+        citation=(
+            "Fedele T, Burnos S, Boran E, Krayenbuehl N, Hilfiker P, Grunwald T, Sarnthein J. "
+            "Resection of high frequency oscillations predicts seizure outcome in the individual "
+            "patient. Scientific Reports 7:13836 (2017). doi:10.1038/s41598-017-13064-1 -- "
+            "BIDS conversion by A. Zhang (mne-hfo), OpenNeuro ds003498, CC0."
+        ),
+        line_freq=50.0,          # Zurich
+        session="ses-interictalsleep",
+        task=None,               # these filenames carry no task or acq entity
+        acq=None,
+        default_run="01",
+        has_hfo_annotations=True,
+    ),
+}
+
+#: The dataset used when none is named: ictal, and the one the quickstart uses.
+DATASET = DATASETS["ds003029"]
 
 #: The example recording the quickstart uses. ECoG grid + strips, 1000 Hz,
 #: one seizure with clinician onset/offset markers.
@@ -244,9 +299,13 @@ class ValidationConfig:
 class PreprocessConfig:
     """Filtering and montage options applied before detection."""
 
-    #: Mains frequency to notch out, plus harmonics up to Nyquist. 60 Hz in
-    #: the US (this dataset), 50 Hz in most of Europe and Asia.
-    line_freq: float = 60.0
+    #: Mains frequency to notch out, plus harmonics up to Nyquist.
+    #: ``None`` means "use the recording's", which each dataset carries (60 Hz
+    #: for the US recordings, 50 Hz for Zurich). Set a number only to override
+    #: it deliberately -- notching the wrong mains frequency leaves the
+    #: interference in place *and* carves a hole where there was none, and it
+    #: is the kind of mistake that never announces itself.
+    line_freq: float | None = None
     notch: bool = True
     #: Bipolar re-referencing of neighbouring contacts on the same electrode.
     #: Standard practice for HFO work: it suppresses far-field and reference
@@ -286,6 +345,35 @@ class PipelineConfig:
             "disagreement_ranks": self.disagreement_ranks,
         }
 
+
+# --------------------------------------------------------------------------
+# Measured operating points
+# --------------------------------------------------------------------------
+
+#: Detection thresholds, in robust SDs, with what each one is for.
+#:
+#: The shipped default (5.0) is Staba's published value and stays the default
+#: because it is what a reviewer expects and what the ictal pipeline was built
+#: with. But it is now *measured* rather than assumed, and on interictal data
+#: it is a poor choice: scored against expert HFO markings on 20 subjects of
+#: ds003498, 5.0 SD reaches recall 0.12 and ranks channels at Spearman 0.37,
+#: against recall 0.38 and 0.66 at 2.0 SD. See ``docs/EVALUATION.md``.
+#:
+#: Use these by name rather than copying numbers around:
+#:
+#:     cfg = PipelineConfig()
+#:     cfg.rms.threshold_sd = THRESHOLDS["interictal-agreement"]
+THRESHOLDS: dict[str, float] = {
+    # Staba et al. 2002, and this package's default.
+    "literature": 5.0,
+    # Highest agreement with expert channel ranking on ds003498 (rho 0.655).
+    # Channel ranking is the clinically meaningful comparison: nobody operates
+    # on an event, they operate on tissue.
+    "interictal-agreement": 2.0,
+    # Highest event-level F1 on the same cohort (0.418). Finds more events and
+    # is wrong more often; prefer it when recall matters more than precision.
+    "interictal-recall": 1.5,
+}
 
 #: Version string stamped into every result table and report, so that a number
 #: someone quotes months from now can be traced back to the code that made it.

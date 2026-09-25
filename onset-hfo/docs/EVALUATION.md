@@ -2,21 +2,101 @@
 
 ## The honest summary
 
-**On the public recording**, precision and recall are *not reported*, because
-no one has marked every ripple in it. What can be measured there: event rates,
-channel rankings, agreement between the two detectors, change across the
-seizure, and a weak comparison against the contacts the clinician named.
+Three sources of truth, answering three different questions. Read the label
+on each number before quoting it.
 
-**On synthetic data**, where every implanted event is known, the detectors are
-scored properly. Those are the numbers below.
+| Data | What is known | What can be measured |
+|---|---|---|
+| **Synthetic** (`onset_hfo.synthetic`) | every implanted event, exactly | precision, recall, F1 against ground truth |
+| **`ds003498`** — Zurich interictal sleep, 20 subjects | expert-validated HFO markings, per channel | **agreement with expert markings**: event-level P/R/F1 and channel-rank correlation |
+| **`ds003029`** — ictal, 1 subject | clinician seizure markers only | rates, rankings, detector agreement, rate change |
 
-Reproduce everything with:
+The middle row is new, and it retires the sentence this document used to open
+with — *"no HFO ground truth exists, so precision and recall are not
+reported"*. That was true of the ictal dataset and false of the archive:
+[ds003498](https://openneuro.org/datasets/ds003498) ships expert markings, in
+a format the loader already reads.
+
+One distinction runs through everything below. Against synthetic data we
+measure **accuracy**, because the truth is constructed. Against ds003498 we
+measure **agreement**, because the reference is itself the validated output of
+another detector. Agreement is the more useful number and the weaker claim,
+and conflating the two would be the easiest way to oversell this software.
+
+Reproduce:
 
 ```bash
-python -m onset_hfo.cli evaluate --seeds 1 7 42 --verbose
+python -m onset_hfo.cli benchmark                      # real data, expert markings
+python -m onset_hfo.cli evaluate --seeds 1 7 42        # synthetic ground truth
 ```
 
 or run [`notebooks/03_validation_and_benchmark.ipynb`](../notebooks/03_validation_and_benchmark.ipynb).
+
+---
+
+## 0. Scored against expert HFO markings (the headline)
+
+**Cohort**: all 20 subjects of ds003498, first 60 s of run-01 each, 2000 Hz,
+slow-wave sleep. **41,187 expert-marked events** in total (35,620 ripples,
+5,567 fast ripples), on the 6–65 channels per subject that the annotators
+reviewed. Scoring is restricted to those channels: a detection elsewhere is
+unjudged, not wrong.
+
+### Ripple band (80–250 Hz), cohort means
+
+| detector | threshold | precision | recall | F1 | rank ρ | top-5 shared |
+|---|---|---|---|---|---|---|
+| RMS | 1.5 SD | 0.432 | 0.478 | **0.418** | 0.592 | 3.05 / 5 |
+| RMS | 2.0 SD | 0.507 | 0.381 | 0.400 | **0.655** | 3.30 / 5 |
+| RMS | 3.0 SD | 0.590 | 0.231 | 0.296 | 0.529 | 2.90 / 5 |
+| RMS | **5.0 SD (shipped default)** | 0.591 | 0.118 | 0.165 | 0.368 | 2.55 / 5 |
+| line length | 2.0 SD | 0.572 | 0.272 | 0.332 | 0.514 | 2.95 / 5 |
+| line length | 5.0 SD | 0.557 | 0.077 | 0.106 | 0.354 | 2.20 / 5 |
+
+### Fast ripple band (250–500 Hz), cohort means
+
+Analysable at last: these recordings are 2000 Hz, the ictal one was 1000.
+
+| detector | threshold | precision | recall | F1 | rank ρ | top-5 shared |
+|---|---|---|---|---|---|---|
+| RMS | 3.5 SD | 0.329 | 0.291 | **0.296** | 0.590 | 3.70 / 5 |
+| RMS | 5.0 SD | 0.543 | 0.204 | 0.264 | **0.610** | 3.55 / 5 |
+| line length | 5.0 SD | 0.643 | 0.173 | 0.234 | 0.560 | 3.45 / 5 |
+
+### What these numbers say
+
+**The shipped default is wrong for interictal HFO work, and now we know by how
+much.** At 5.0 SD — Staba's published value, which this pipeline inherited —
+the ripple detector finds 12% of the expert-marked events and ranks channels
+at ρ = 0.37. At 2.0 SD it finds 38% and ranks at ρ = 0.66. The threshold was
+never tuned to the simulator on principle; it turns out the principle
+protected a value that real data does not support. `config.THRESHOLDS` now
+carries both, measured and named, and `--threshold interictal-agreement`
+selects the better one. The default stays 5.0 so that published ictal results
+do not silently change; a future release should split the defaults by task.
+
+**The two criteria disagree slightly, and both are reported.** F1 peaks at
+1.5 SD, channel-rank agreement at 2.0 SD. Both are interior maxima — the sweep
+was extended downwards precisely because the first grid put its optimum on
+the edge, which is not an optimum but a boundary. Channel ranking is the more
+clinically meaningful of the two: nobody operates on an event.
+
+**Precision plateaus around 0.6, and that is expected.** The reference is the
+validated output of the original study's Morphology detector — not a census of
+every oscillation. Events we find that it did not are counted as false
+positives whether or not they are real, so 0.6 is a floor on our precision,
+not a measurement of it. The honest reading: *we reproduce roughly half of a
+different detector's validated events and rank the same channels as active at
+ρ ≈ 0.65.*
+
+**RMS beats line length on real data**, reversing their order on synthetic
+data (0.679 vs 0.697 F1 there). A detector comparison that holds only on
+simulated signal is a comparison of simulators.
+
+**Per-subject variability is large** and the cohort mean hides it: reviewed
+channels range from 6 to 65, expert events per 60 s from 644 to 7,935, and
+per-subject best F1 from 0.14 to 0.56 (median 0.48). `artifacts/results/benchmark_ds003498/scores.csv`
+has every row.
 
 ---
 
@@ -144,7 +224,7 @@ evidence, test on the raw samples.**
 
 ---
 
-## 6. What can be checked on the real recording
+## 6. What can be checked on the ictal recording
 
 `sub-pt01`, ictal run 01, 50–110 s, 71 bipolar channels, 1000 Hz. The whole
 run takes about 7 seconds and produces 1732 RMS candidates (1549 accepted),

@@ -22,6 +22,71 @@ ranges over plain HTTPS**, which is what makes a ten-minute notebook possible.
 The default example is `sub-pt01`, `task-ictal`, `run-01`: 98 channels,
 1000 Hz, 269 s, with an electrographic seizure marked at 75.95–161.82 s.
 
+## The second dataset: expert HFO markings, interictal sleep
+
+[OpenNeuro **ds003498**](https://openneuro.org/datasets/ds003498) — the
+**Zurich iEEG HFO dataset**, CC0, 20 subjects, 2000 Hz, five-minute segments
+of slow-wave sleep chosen for HFO analysis. Recorded at University Hospital
+Zurich; converted to BIDS by the author of `mne-hfo`.
+
+It matters for one reason: **its `events.tsv` carries expert HFO markings**.
+
+```
+onset    duration  trial_type        value  sample
+0.0015   0.016     fr_PHR1-2         21     3
+0.0015   0.0515    ripple_AHR3-4     41     3
+0.0525   0.0695    ripple_HL2-3      48     105
+```
+
+Each row is one marked oscillation: its kind, and the **bipolar channel** it
+sits on, written with the shared electrode name once (`HL2-3` means
+`HL2`–`HL3`, which is exactly how this pipeline names that channel).
+`onset_hfo.datasets.parse_hfo_annotations` turns those into a truth table, and
+`onset_hfo.benchmark` scores against it. Three properties of this reference
+have to be stated, because each one changes how a score should be read.
+
+**It is a detector's output that a human validated, not a census.** The
+markings come from the Morphology detector used in the original study,
+reviewed by the authors. An oscillation neither the detector proposed nor the
+reviewer noticed is absent from the file, so "recall" means *recall of those
+validated events*, and an event we find that they did not is counted against
+us even when it may be real.
+
+**Only some channels were reviewed.** The study kept the three most mesial
+bipolar channels in temporal-lobe cases, so a typical recording has markings
+on ~23 of ~43 possible channels. A detection on an unreviewed channel is
+**unjudged, not wrong**, and every score in this repository is restricted to
+reviewed channels for that reason. `Recording.reviewed_channels` carries the
+list; forgetting to use it silently halves precision.
+
+**A `frandr` event is one event in two bands.** A fast ripple riding on a
+ripple becomes two rows, one per band, because the evidence really is in
+both, and each band is scored separately.
+
+**Mains is 50 Hz here and 60 Hz in ds003029.** The `DatasetSpec` carries it
+and preprocessing takes it from the recording unless told otherwise. Notching
+the wrong one leaves the interference in place *and* carves a hole where
+there was none — the kind of mistake that never announces itself in a plot.
+
+```python
+from onset_hfo.datasets import fetch_slice, list_subjects
+
+list_subjects("ds003498")                      # 20 subjects
+rec = fetch_slice(dataset="ds003498", subject="sub-01", run="01", t_start=0, t_stop=60)
+rec.ground_truth.head()                        # expert events, per band, per channel
+rec.reviewed_channels                          # the only channels a score may use
+```
+
+Cite: Fedele T, Burnos S, Boran E, Krayenbühl N, Hilfiker P, Grunwald T,
+Sarnthein J. *Resection of high frequency oscillations predicts seizure
+outcome in the individual patient.* Sci Rep 7:13836 (2017).
+doi:10.1038/s41598-017-13064-1
+
+Its `participants.tsv` also carries **surgical outcome** (ILAE class, seizure
+freedom, follow-up months, lesional status) for 19 subjects — which is the
+reference standard `docs/ROADMAP.md` wants for the outcome study, sitting in
+the archive unused.
+
 ## How only 24 MB gets downloaded
 
 BrainVision stores samples **multiplexed**: channel 1 at time 1, channel 2 at
