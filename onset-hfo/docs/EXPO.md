@@ -227,8 +227,10 @@ anyone claiming otherwise.
   is the conversation you want.
 - **A laptop beats a phone.** Three-panel figures and the ranking table need
   the width.
-- **Printed handout:** `site/handout.html` — open it and print to PDF, one
-  page, designed for it.
+- **Printed handout:** `site/handout.html`, also linked from the results site
+  and live at <https://berdakh.github.io/onset-hfo/handout.html> — open it and
+  print to PDF. It is laid out to fill exactly one A4 page, so print it before
+  you travel and check the page count.
 
 ---
 
