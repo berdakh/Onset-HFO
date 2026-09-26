@@ -363,6 +363,104 @@ cannot be checked from the output.
 
 ---
 
+## Does it hold from one night to the next?
+
+The window study settles a question about **one recording**. Each patient here
+contributed several, on different nights, and whether the answer holds between
+them decides something that matters more: whether this is a *per-patient*
+measurement or a *per-recording* one. Only the first is any use clinically.
+
+```bash
+python -m onset_hfo.cli stability --across-runs 5
+```
+
+![Across runs](img/run_stability.png)
+
+First, a correction to something this repository believed. `participants.tsv`
+has a `nights` column reading 1–6, and the archive turns out to hold **385
+runs** across the 20 subjects — 1 to 39 each — because a night contributes
+several five-minute segments. All of them is about 46 GB, so this study reads
+the first five per subject (92 runs) and deletes each slice once it has been
+analysed.
+
+### A whole run is a stable unit of measurement; a minute is not
+
+The per-patient answer, across that patient's own runs:
+
+| | across 5 disjoint **minutes** of one run | across 5 **runs** (different nights) |
+|---|---|---|
+| expert | 9/20 patients unchanged | **18/20** |
+| rms | 16/20 | **16/20** |
+
+This is the clearest result in the whole stability exercise. The expert
+markings doubled their agreement with themselves when the unit of analysis
+became a whole run instead of a minute of one, and only `sub-08` and `sub-18`
+move at all. Our detector is unchanged at 16/20 — it was already the more
+reproducible of the two at short windows, and it gains nothing from the longer
+unit because it had not lost anything.
+
+The group statistic moves correspondingly little between nights: expert AUC
+0.623–0.723 (range 0.100), ours 0.575–0.723 (range 0.148), against 0.253 and
+0.090 between minutes.
+
+**Read the per-run numbers with one caveat.** Two subjects (`sub-07`,
+`sub-17`, both recurrences) have a single run in the archive, so the per-run
+comparison is restricted to the 18 subjects present in every run — **13
+seizure-free against 5** — to avoid comparing different cohorts across runs.
+That is a smaller and more fragile comparison than the pooled one below, and
+its absolute AUCs are not comparable to the 13-vs-7 numbers elsewhere in this
+document.
+
+### Pooling a patient's runs resolves the ties
+
+| | one run | runs pooled |
+|---|---|---|
+| median candidate-set size, expert | 2 | **1** |
+| median candidate-set size, rms | 2 | **1** |
+| largest set, expert | 24 channels | **5** |
+| largest set, rms | 37 channels | **5** |
+| patients where the leader stands alone, expert | 48% of runs | **13/20** |
+
+This is what more recording was supposed to buy and, unlike the window study,
+it delivers: the Poisson intervals narrow, ties resolve, and the worst case
+stops being absurd. A patient whose busiest channel could not be told apart
+from 23 others in one run has a set of at most five once five runs are added
+together.
+
+### It does not rescue the group result
+
+| source | metric | seizure-free | recurrence | AUC | p |
+|---|---|---|---|---|---|
+| expert | `top_channel_resected` | 0.85 | 0.57 | 0.637 | 0.29 |
+| rms | `top_channel_resected` | 0.85 | 0.43 | 0.709 | 0.12 |
+| expert | `candidates_resected` | 0.89 | 0.59 | 0.709 | 0.09 |
+| rms | `candidates_resected` | 0.74 | 0.50 | 0.632 | 0.36 |
+| rms | `top_channel_resected` (ripple) | 0.62 | 0.14 | 0.736 | 0.07 |
+
+**Nothing reaches p < 0.05.** The minimum across the whole pooled table is
+0.070. Pooling actually *lowers* the expert argmax arm (0.709 on a single run
+to 0.637), because the recurrence group's mean rises from 0.43 to 0.57 — with
+more data, more recurrence patients turn out to have had their busiest
+fast-ripple channel removed, which is evidence against the hypothesis rather
+than noise in our favour.
+
+One line that will be tempting to quote and should not be: pooled, **our
+detector edges the expert markings** on the pre-specified metric for the first
+time (0.709 against 0.637). At p = 0.12, on 20 patients, in a table of 24
+comparisons, that is what a coin does. It is in the table because leaving it
+out would be the same sin as quoting it.
+
+### What this settles
+
+The per-patient answer **is** stable across nights, so the quantity this
+pipeline measures is a property of the patient rather than of the recording
+session. That was the open question, and it is the precondition for anything
+clinical. What remains unsettled is whether the quantity *predicts outcome*,
+and twenty patients cannot settle it — every arm of every study here sits
+below the AUC 0.85 this cohort would need.
+
+---
+
 ## What the numbers say
 
 **Fast ripples localise better than ripples in the expert arm; in ours the two

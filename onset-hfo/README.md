@@ -188,6 +188,18 @@ the data picks a single channel in only 9 of 20 patients — worst case, 24 tied
 channels out of 37 — and reporting the set instead of a winner costs 0.017 AUC.
 Never quote the single-channel number without `n_candidates` beside it.
 
+**And the reassuring one.** Across five *different nights* the per-patient
+answer holds for 18 of 20 patients (experts) and 16 of 20 (ours) — against
+9 and 16 across five *minutes* of a single run. Pooling a patient's runs cuts
+the median candidate set from 2 channels to 1 and the worst case from 24 to 5.
+So the quantity measured here is a property of the **patient**, not of the
+recording session; a minute was simply too short a unit. It still does not
+predict outcome at p < 0.05 on twenty patients — nothing here does.
+
+```bash
+python -m onset_hfo.cli stability --across-runs 5   # 92 runs, disk-pruned
+```
+
 **Against expert HFO markings** — 20 subjects of [ds003498](https://openneuro.org/datasets/ds003498)
 (Zurich interictal slow-wave sleep, 2000 Hz), 41,187 expert-marked events,
 scored only on the channels the annotators reviewed:

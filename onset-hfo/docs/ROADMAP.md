@@ -270,7 +270,7 @@ every answer's citations resolving to the window the reader can see. Reuse
 
 ---
 
-## 10. Is the channel ranking stable? — *steps 1-3 done; step 4 open*
+## 10. Is the channel ranking stable? — *done*
 
 **Why.** The outcome study's conclusion changed between a 60-second window and
 a 300-second one (§2), moving on two patients out of twenty. Every clinical
@@ -314,9 +314,33 @@ exactly when the set has one member. What it found:
   noisy. Candidate sets do not rescue a short window; they make its
   uncertainty visible.
 
-**Step 4, newly implied.** The curve settles within one run but a patient has
-1–6 runs in the archive, recorded on different nights. Combining them is now
-the open question the window study could not answer.
+**Step 4 is done, and it is the good news of the four.** The archive holds
+**385 runs** over the 20 subjects -- 1 to 39 each, not the 1-6 the `nights`
+column suggests -- so `across_runs` reads the first five per subject and
+prunes each slice after use. What it found:
+
+* **A whole run is a stable unit of measurement; a minute is not.** The
+  per-patient answer holds across five different nights for **18/20** patients
+  (experts) and 16/20 (ours), against 9/20 and 16/20 across five minutes of a
+  single run. The expert markings doubled their agreement with themselves; our
+  detector was already there and gained nothing, because it had not lost
+  anything.
+* **Pooling a patient's runs resolves the ties.** Median candidate set 2 -> 1,
+  worst case 24 channels -> 5 (expert) and 37 -> 5 (ours). This is what more
+  recording was supposed to buy, and unlike the window study it delivers.
+* **It does not rescue the group result.** Nothing in the pooled table reaches
+  p < 0.05 (minimum 0.070), and pooling *lowers* the expert argmax arm from
+  0.709 to 0.637 because more recurrence patients turn out to have had their
+  busiest channel removed.
+
+So the quantity this pipeline measures is a property of the **patient**, not
+of the recording session. That was the precondition for anything clinical and
+it now holds. What twenty patients cannot settle is whether the quantity
+predicts outcome.
+
+**What is left is no longer item 10.** Every question it posed has an answer.
+The next one is a second cohort: nothing here has been shown to hold outside
+Zurich.
 
 **Touches.** `onset_hfo/outcome.py`, `onset_hfo/metrics.py`,
 `onset_hfo/stability.py`, `docs/OUTCOME.md`.
