@@ -96,7 +96,7 @@ python -m onset_hfo.cli outcome
 #     (or just open https://onsetnu.streamlit.app/)
 pip install -e ".[app]" && streamlit run app/Home.py
 
-pytest -q        # 285 tests, all offline
+pytest -q        # 314 tests, all offline
 ```
 
 ## What it actually does

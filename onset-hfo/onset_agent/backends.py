@@ -214,22 +214,51 @@ class TransformersBackend(Backend):
       the guards in :mod:`onset_agent.guard` exist because small models fail,
       and watching a 1.5B model get caught is the most useful thing a reader
       can see.
+    * ``quantization`` is ``"fp16"``, ``"8bit"`` or ``"4bit"`` and is the
+      axis :mod:`onset_agent.benchmark` sweeps. On a card without bfloat16 ---
+      a T4, for instance --- pass ``dtype="float16"`` explicitly: most recent
+      model configs declare bfloat16, and ``dtype="auto"`` will honour that on
+      hardware that cannot run it.
+    * ``revision`` pins the model to a commit. Leaving it at ``"main"`` means
+      a re-run months later may not load the same weights, which is the kind
+      of unrecorded difference this project exists to avoid.
     """
 
+    #: What ``quantization=`` accepts. ``fp16`` loads the weights as the
+    #: backend would anyway; the other two need ``bitsandbytes``.
+    QUANTIZATIONS = ("fp16", "8bit", "4bit")
+
     def __init__(self, model_id: str = DEFAULT_HF_MODEL, max_new_tokens: int = 384,
-                 device: str | None = None, dtype: str = "auto", load_in_4bit: bool = False):
+                 device: str | None = None, dtype: str = "auto", load_in_4bit: bool = False,
+                 load_in_8bit: bool = False, quantization: str | None = None,
+                 revision: str | None = None):
         from transformers import AutoModelForCausalLM, AutoTokenizer  # noqa: PLC0415
 
+        if quantization is not None:
+            if quantization not in self.QUANTIZATIONS:
+                raise ValueError(f"quantization must be one of {self.QUANTIZATIONS}, "
+                                 f"not {quantization!r}")
+            load_in_4bit = quantization == "4bit"
+            load_in_8bit = quantization == "8bit"
+        if load_in_4bit and load_in_8bit:
+            raise ValueError("choose one of 4-bit or 8-bit, not both")
+
         self.model_id = model_id
+        self.revision = revision or "main"
+        self.quantization = quantization or (
+            "4bit" if load_in_4bit else "8bit" if load_in_8bit else "fp16")
+        self.dtype = dtype
         self.name = f"transformers:{model_id}"
         self.max_new_tokens = max_new_tokens
-        self.tokenizer = AutoTokenizer.from_pretrained(model_id)
+        load_kwargs = {"revision": revision} if revision else {}
+        self.tokenizer = AutoTokenizer.from_pretrained(model_id, **load_kwargs)
         kwargs: dict = {"dtype": dtype} if dtype != "auto" else {}
-        if load_in_4bit:  # pragma: no cover - needs bitsandbytes + GPU
+        if load_in_4bit or load_in_8bit:  # pragma: no cover - needs bitsandbytes + GPU
             from transformers import BitsAndBytesConfig
-            kwargs["quantization_config"] = BitsAndBytesConfig(load_in_4bit=True)
+            kwargs["quantization_config"] = BitsAndBytesConfig(
+                load_in_4bit=load_in_4bit, load_in_8bit=load_in_8bit)
         self.model = AutoModelForCausalLM.from_pretrained(
-            model_id, device_map=device or "auto", **kwargs)
+            model_id, device_map=device or "auto", **kwargs, **load_kwargs)
 
     def describe(self) -> str:
         return f"{self.name} (in-process)"
