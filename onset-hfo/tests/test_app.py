@@ -18,6 +18,15 @@ import pytest
 
 from app import panels
 
+
+@pytest.fixture(scope="module")
+def study_groups():
+    """The committed *group* table, for checking the per-patient view against."""
+    import pandas as pd
+
+    return pd.read_csv(panels.STUDIES / "outcome_groups_300s.csv")
+
+
 # -- finding analyses ------------------------------------------------------
 
 def test_a_directory_without_events_is_not_an_analysis(tmp_path, store):
@@ -241,3 +250,178 @@ def test_reload_spec_names_everything_fetch_slice_needs(store, monkeypatch):
     assert set(spec) == {"dataset", "subject", "run", "session", "task", "acq",
                          "t_start", "t_stop"}
     assert spec["dataset"] == "ds003029"
+
+
+# -- the cohort, per patient -----------------------------------------------
+#
+# The Patients page shows one row per patient rather than one row per group,
+# which is the first place in this project where a *single patient's* number
+# is on screen. These tests exist because that is exactly where a number is
+# easiest to over-read: they pin the join, and they pin the caveats that sit
+# next to it.
+
+
+def test_every_committed_cohort_table_is_readable_on_a_fresh_clone():
+    """The page must work with no download, like every other page."""
+    for name, expected in (("participants.csv", 20), ("recordings.csv", 20),
+                           ("subjects.csv", 160), ("channels.csv", 1880)):
+        table = panels.cohort_table(name)
+        assert len(table) == expected, f"{name} has {len(table)} rows, expected {expected}"
+
+
+def test_a_missing_cohort_table_is_empty_not_an_error():
+    assert panels.cohort_table("no_such_table.csv").empty
+
+
+def test_the_committed_tables_carry_no_demographics():
+    """Age, sex and handedness are in the archive and deliberately not here.
+
+    Twenty patients with pathology, surgical extent and outcome is already a
+    small cohort; three demographic fields per patient narrow it considerably
+    and no analysis in the project uses them. See `data/outcome/README.md`.
+    """
+    for name in ("participants.csv", "recordings.csv", "subjects.csv", "channels.csv"):
+        columns = set(panels.cohort_table(name).columns)
+        assert not columns & {"age", "sex", "hand", "handedness"}, \
+            f"{name} carries a demographic column that was meant to be dropped"
+
+
+def test_the_overview_has_one_row_per_patient_and_both_arms_on_it():
+    overview = panels.cohort_overview()
+    assert len(overview) == 20
+    assert overview["subject"].is_unique
+    for source in ("expert", "rms"):
+        assert {f"top_resected_{source}", f"n_candidates_{source}",
+                f"share_in_rz_{source}"} <= set(overview.columns)
+
+
+def test_the_overview_reproduces_the_published_outcome_split():
+    """The per-patient view must add up to the group number, or one of them is wrong.
+
+    13 seizure-free against 7 recurrences is the cohort the whole study rests
+    on; a join that silently dropped or duplicated a patient would still look
+    like a table.
+    """
+    overview = panels.cohort_overview()
+    assert int(overview["seizure_free"].sum()) == 13
+    assert int((~overview["seizure_free"]).sum()) == 7
+
+
+def test_the_overview_matches_the_group_table_it_sits_beside(study_groups):
+    """Counting patients by hand must give the group table's own means.
+
+    Two numbers disagreeing on one screen is the failure this project is
+    organised against, and this page puts the rows and the means one click
+    apart.
+    """
+    overview = panels.cohort_overview()
+    for source in ("expert", "rms"):
+        row = study_groups.query(
+            "source == @source and band == 'fast_ripple' and scope == 'reviewed' "
+            "and metric == 'top_channel_resected'")
+        if row.empty:
+            pytest.skip(f"no group row for {source}")
+        hit = overview[f"top_resected_{source}"] == 1
+        for column, mask in (("mean_seizure_free", overview["seizure_free"]),
+                             ("mean_recurrence", ~overview["seizure_free"])):
+            assert float(row.iloc[0][column]) == pytest.approx(
+                float(hit[mask].mean()), abs=5e-3), \
+                f"{source} {column} disagrees with the patients it is a mean of"
+
+
+def test_the_overview_carries_resection_coverage_and_five_patients_are_short_of_it():
+    """The column a view of this data must not hide.
+
+    In five temporal-lobe patients only a quarter of the resected contacts were
+    recorded, so their "share inside the resection" describes a quarter of
+    their resection.
+    """
+    overview = panels.cohort_overview()
+    thin = overview[overview["rz_coverage"] < 1.0]
+    assert len(thin) == 5
+    assert thin["rz_coverage"].tolist() == pytest.approx([0.25] * 5)
+
+
+def test_a_band_scope_arm_that_does_not_exist_is_empty_not_a_wrong_answer():
+    assert panels.cohort_overview(band="theta", scope="reviewed").empty or \
+        panels.cohort_overview(band="theta", scope="reviewed")["top_resected_expert"].isna().all()
+
+
+def test_subject_metrics_covers_both_bands_both_scopes_both_sources():
+    rows = panels.subject_metrics("sub-01")
+    assert len(rows) == 8
+    assert set(rows["band"]) == {"ripple", "fast_ripple"}
+    assert set(rows["scope"]) == {"reviewed", "all"}
+    assert set(rows["source"]) == {"expert", "rms"}
+
+
+def test_subject_metrics_for_someone_not_in_the_cohort_is_empty():
+    assert panels.subject_metrics("sub-99").empty
+
+
+def test_subject_channels_are_reviewed_zoned_and_busiest_first():
+    rows = panels.subject_channels("sub-01")
+    assert len(rows)
+    assert rows["reviewed"].all(), "the page must only show channels that were scored"
+    assert set(rows["zone"]) <= {"resected", "partial", "spared"}
+    assert rows["expert_events"].is_monotonic_decreasing
+
+
+def test_subject_channels_can_be_asked_for_the_unreviewed_ones_too():
+    reviewed = panels.subject_channels("sub-01", reviewed_only=True)
+    every = panels.subject_channels("sub-01", reviewed_only=False)
+    assert len(every) > len(reviewed)
+
+
+def test_a_thin_resection_produces_a_caveat_naming_the_coverage():
+    """sub-02 had 4 of 16 resected contacts recorded; the page must say so."""
+    notes = panels.subject_caveats("sub-02")
+    assert any("25%" in note for note in notes), notes
+
+
+def test_the_worst_tie_in_the_cohort_produces_a_caveat_naming_its_size():
+    """sub-12's expert arm had 24 tied channels — the documented worst case."""
+    notes = panels.subject_caveats("sub-12")
+    assert any("24" in note and "expert" in note for note in notes), notes
+    assert any("RMS arm" in note for note in notes), "the RMS arm must be named as RMS"
+
+
+def test_a_patient_whose_answer_changed_between_minutes_gets_told_on():
+    """Window instability is the study's own headline correction, per patient."""
+    overview = panels.cohort_overview()
+    unstable = overview[overview["stable_across_windows_expert"] == False]  # noqa: E712
+    assert len(unstable), "no unstable patients: the stability tables did not join"
+    notes = panels.subject_caveats(unstable.iloc[0]["subject"])
+    assert any("changed between the five" in note for note in notes), notes
+
+
+def test_every_patient_is_either_clean_or_carries_a_reason():
+    """No patient may be silently uncaveated because a lookup missed.
+
+    An empty list has to mean "the four checks passed", never "the join
+    dropped this row" -- so every patient with a known problem must produce a
+    note, and the clean ones must be clean for a checkable reason.
+    """
+    overview = panels.cohort_overview().set_index("subject")
+    clean = 0
+    for subject, row in overview.iterrows():
+        notes = panels.subject_caveats(subject)
+        problems = (row["rz_coverage"] < 1.0
+                    or row["n_candidates_expert"] > 1 or row["n_candidates_rms"] > 1
+                    or row["stable_across_windows_expert"] is False
+                    or row["stable_across_windows_rms"] is False
+                    or row["stable_across_runs_expert"] is False
+                    or row["stable_across_runs_rms"] is False)
+        assert bool(notes) == bool(problems), f"{subject}: {notes} vs {problems}"
+        clean += not notes
+    assert clean == 5, f"{clean} patients trip none of the four checks, expected 5"
+
+
+def test_an_unknown_subject_gets_a_caveat_rather_than_an_empty_all_clear():
+    """Silence must never be the answer for a patient we know nothing about."""
+    assert panels.subject_caveats("sub-99") == [
+        "No committed cohort tables for this subject."]
+
+
+def test_the_page_defaults_to_the_arm_the_study_pre_specified():
+    assert panels.PRIMARY == {"band": "fast_ripple", "scope": "reviewed"}
