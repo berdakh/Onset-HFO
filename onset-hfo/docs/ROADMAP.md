@@ -21,7 +21,7 @@ which of it is blocked on what.**
 | **1** | [**Run the agent ladder under a real model**](#8-the-agent-more-tools-and-a-measured-evaluation-of-it) | harness done, **numbers missing** | a GPU afternoon |
 | **2** | [**A second cohort**](#11-a-second-cohort) | not started | finding an archive |
 | **3** | [The ladder across the 22-subject cohort](#2-outcome-as-the-reference-standard--done-twice-the-ladder-across-the-cohort-is-not) | cheap; recordings cached | deliberately gated on #1 |
-| **4** | [Two more detectors, and an agreement matrix](#4-more-than-two-detectors-and-a-proper-agreement-analysis) | not started | nothing |
+| **4** | [Sweep the two new detectors on real data](#4-more-than-two-detectors-and-a-proper-agreement-analysis--built-measured-only-on-synthetic-data) | built; synthetic only | a `benchmark` run with network |
 | **5** | [A hand-annotated benchmark](#5-a-small-hand-annotated-benchmark) | not started | two reviewers' time |
 | **6** | [Physiological versus epileptic ripples](#6-physiological-versus-epileptic-ripples) | not started | nothing, and it is hard |
 | **7** | [Whole recordings in `run` and `benchmark`](#7-scaling-whole-recordings-instead-of-one-minute-slices--done-for-the-outcome-study) | done for `outcome` only | nothing |
@@ -183,18 +183,47 @@ that ships coordinates.
 
 ---
 
-## 4. More than two detectors, and a proper agreement analysis
+## 4. More than two detectors, and a proper agreement analysis — *built; measured only on synthetic data*
 
 **Why.** Two detectors matching about half their events is a finding worth
 taking seriously. Three or four would show whether the disagreement is
 idiosyncratic or structural.
 
-**What.** Add the Hilbert-envelope (MNI) and short-time-energy detectors —
-both fit `detect_with_feature` almost unchanged. Then report agreement as a
-matrix, and rank channels by the *number of detectors* that place them in the
-top group, which is more robust than any single rate.
+**Built.** `detect_hilbert` (the smoothed analytic-signal envelope) and
+`detect_short_time_energy` (the sum of squares), both through the same
+`detect_with_feature` engine, so the four differ only in the feature they
+threshold. `metrics.agreement_matrix` reports every pair, and
+`metrics.consensus_ranking` ranks channels by the *number of detectors* that
+place them in their own top group rather than by an average of four rates on
+four different scales. Both are **opt-in**: `run_pipeline` still defaults to
+two, because turning them on would change every published number without
+anyone deciding to.
 
-**Touches.** `onset_hfo/detectors/`, `metrics.py`, `report.py`.
+**What it found, on the simulator** ([`EVALUATION.md`](EVALUATION.md) §1b):
+
+* **The disagreement is structural.** Every pair of the four agrees on between
+  47% and 79% of events. No two of these detectors agree on more than four
+  events in five.
+* **A prediction written into the code was wrong**, which is why it was
+  written down first. `short_time_energy` was expected to be nearly redundant
+  with `rms` — they are monotone-related, so a *fixed* threshold would select
+  identical samples. It is the **least** similar pair (0.471), and the closest
+  pair is RMS with the envelope (0.788).
+* **The cause generalises, and is the actual result.** `median + 5 robustSD`
+  sits near the 98th percentile of an RMS trace and the 96th of an energy
+  trace, because squaring is not affine. **A threshold in robust SDs is not a
+  portable operating point between features.** §3 said the threshold is a
+  choice rather than a fact; this says the choice does not transfer.
+
+**What remains.** All of it is synthetic. The real-data agreement matrix on
+ds003498 against the expert markings needs one `onset-hfo benchmark` run with
+network access, and each of the two new features needs its own threshold
+sweep — inheriting 5.0 SD is exactly the mistake §0 caught the first time.
+Until then these are machinery with a sanity check, not a result.
+
+**Touches.** `onset_hfo/detectors/` (done), `metrics.py` (done),
+`config.py` (done), `report.py` — the report still shows one pairwise
+agreement rather than the matrix.
 
 ---
 

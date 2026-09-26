@@ -1,9 +1,10 @@
 """Shared machinery for every detector: the event record and the small set of
 signal-processing primitives the detectors are built from.
 
-Keeping these in one place means the two HFO detectors differ *only* in the
-feature they threshold (RMS energy vs. line length), which is exactly the
-comparison the project wants to make visible.
+Keeping these in one place means the HFO detectors differ *only* in the
+feature they threshold -- RMS energy, line length, the Hilbert envelope, or
+short-time energy -- which is exactly the comparison the project wants to make
+visible.
 """
 
 from __future__ import annotations
@@ -13,7 +14,7 @@ from dataclasses import asdict, dataclass, field
 
 import numpy as np
 import pandas as pd
-from scipy.signal import find_peaks
+from scipy.signal import find_peaks, hilbert
 
 __all__ = [
     "Event",
@@ -23,6 +24,8 @@ __all__ = [
     "bandpass",
     "sliding_rms",
     "sliding_line_length",
+    "sliding_hilbert_envelope",
+    "sliding_energy",
     "threshold_segments",
     "extend_segments",
     "merge_events",
@@ -210,6 +213,43 @@ def sliding_line_length(x: np.ndarray, window: int) -> np.ndarray:
     """
     diffs = np.abs(np.diff(x, axis=-1, prepend=x[..., :1]))
     return _sliding_sum(diffs, window) / max(window, 1)
+
+
+def sliding_hilbert_envelope(x: np.ndarray, window: int) -> np.ndarray:
+    """Amplitude envelope from the analytic signal, smoothed over a window.
+
+    The envelope is :math:`|x + i\,\mathcal{H}\{x\}|`, where
+    :math:`\mathcal{H}` is the Hilbert transform. Unlike RMS it is defined
+    sample by sample rather than accumulated over a window, so it follows the
+    rise and fall of a burst more sharply; the short moving average afterwards
+    is only to stop single-sample excursions from setting the threshold.
+
+    This is the feature used by envelope-based HFO detectors. It is **not** a
+    reimplementation of the MNI detector of Zelmann et al. (2012), whose
+    distinguishing contribution is an automatic baseline-selection stage on a
+    wavelet-entropy criterion. Only the feature is shared; see
+    :mod:`onset_hfo.detectors.hilbert` for why that distinction is kept
+    explicit.
+    """
+    envelope = np.abs(hilbert(np.asarray(x, dtype=np.float64), axis=-1))
+    if window <= 1:
+        return envelope
+    return _sliding_sum(envelope, window) / window
+
+
+def sliding_energy(x: np.ndarray, window: int) -> np.ndarray:
+    """Short-time energy: the *sum* of squares in a sliding window.
+
+    Related to :func:`sliding_rms` by a monotone transform --
+    ``rms = sqrt(energy / window)`` -- so under a *fixed* threshold the two
+    would select identical samples. They differ substantially here because the
+    threshold is ``median + k * robustSD`` of the feature's own distribution,
+    and squaring is not affine: the same ``k`` lands near the 98th percentile
+    of an RMS trace and the 96th of an energy trace. See
+    :mod:`onset_hfo.detectors.short_time_energy`, where that was predicted
+    to be a small effect and measured to be a large one.
+    """
+    return _sliding_sum(np.asarray(x, dtype=np.float64) ** 2, window)
 
 
 def threshold_segments(metric: np.ndarray, threshold: float, min_len: int,

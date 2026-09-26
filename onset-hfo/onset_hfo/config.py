@@ -187,7 +187,7 @@ BANDS = Bands()
 
 @dataclass
 class DetectorConfig:
-    """Parameters shared by the two HFO detectors.
+    """Parameters shared by every HFO detector.
 
     Defaults follow the classic references and are intentionally conservative:
     a prototype that reports a few well-formed events is more useful than one
@@ -332,6 +332,12 @@ class PipelineConfig:
     preprocess: PreprocessConfig = field(default_factory=PreprocessConfig)
     rms: DetectorConfig = field(default_factory=DetectorConfig)
     line_length: DetectorConfig = field(default_factory=lambda: DetectorConfig(threshold_sd=3.0))
+    #: The two opt-in detectors. Their thresholds are **inherited** from the
+    #: energy detector, not measured: no sweep has been run for either on real
+    #: data. ``docs/EVALUATION.md`` §0 is what happens when an inherited
+    #: default goes unchecked, so sweep before trusting these.
+    hilbert: DetectorConfig = field(default_factory=DetectorConfig)
+    short_time_energy: DetectorConfig = field(default_factory=DetectorConfig)
     spikes: SpikeConfig = field(default_factory=SpikeConfig)
     validation: ValidationConfig = field(default_factory=ValidationConfig)
     #: Seconds; the unit in which per-channel event rates are reported.
@@ -346,6 +352,8 @@ class PipelineConfig:
             "preprocess": asdict(self.preprocess),
             "rms": asdict(self.rms),
             "line_length": asdict(self.line_length),
+            "hilbert": asdict(self.hilbert),
+            "short_time_energy": asdict(self.short_time_energy),
             "spikes": asdict(self.spikes),
             "validation": asdict(self.validation),
             "rate_window_s": self.rate_window_s,

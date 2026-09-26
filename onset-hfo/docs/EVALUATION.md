@@ -168,6 +168,104 @@ marginal ones. Section 3 shows exactly how that trades off.
 
 ---
 
+## 1b. Four detectors, and what the extra two are worth
+
+Two detectors matching about half their events is a finding. Three or four
+answer the question that one pair cannot: is the disagreement **structural**,
+or an idiosyncrasy of RMS-versus-line-length? `detect_hilbert` (the smoothed
+analytic-signal envelope) and `detect_short_time_energy` (the sum of squares)
+were added for that, and are **opt-in** — `run_pipeline` still defaults to two,
+because their thresholds are inherited rather than measured and turning them on
+by default would change every number above without anyone deciding to.
+
+```python
+res = run_pipeline(rec, detectors=("rms", "line_length", "hilbert", "short_time_energy"))
+metrics.agreement_matrix(res.events)          # who agrees with whom
+metrics.consensus_ranking(res.events, res.duration_s)   # channels by votes, not rates
+```
+
+### Against synthetic ground truth
+
+Three seeds, 60 s, 15 bipolar channels, ripple band, all four at their default
+thresholds. The first two rows reproduce §1 exactly, which is the check that
+adding detectors perturbed nothing.
+
+| detector | threshold | precision | recall | F1 | detections |
+|---|---|---|---|---|---|
+| RMS | 5.0 SD | 0.956 | 0.528 | 0.679 | 138 |
+| line length | 3.0 SD | 0.957 | 0.550 | 0.697 | 150 |
+| Hilbert envelope | 5.0 SD | 0.932 | 0.556 | 0.696 | 149 |
+| short-time energy | 5.0 SD | 0.835 | **0.808** | **0.821** | 291 |
+
+### The agreement matrix
+
+Mean Jaccard over the same three seeds:
+
+| | RMS | line length | Hilbert | short-time energy |
+|---|---|---|---|---|
+| **RMS** | 1.000 | 0.588 | **0.788** | **0.471** |
+| **line length** | 0.588 | 1.000 | 0.574 | 0.500 |
+| **Hilbert** | 0.788 | 0.574 | 1.000 | 0.506 |
+| **short-time energy** | 0.471 | 0.500 | 0.506 | 1.000 |
+
+**The disagreement is structural, not a quirk of one pair.** Every off-diagonal
+cell sits between 0.47 and 0.79. No two of these four detectors agree on more
+than four events in five, and the worst pair agrees on fewer than half. A
+single-detector rate table is less certain than it looks, and now that is four
+measurements rather than one.
+
+### A prediction made here was wrong, and that is the useful part
+
+`short_time_energy` was added *expecting it to be nearly redundant* with RMS:
+`energy = window × rms²` is a monotone transform, so under a **fixed** threshold
+the two would select identical samples. The docstring said so before the
+measurement, which is the only reason the correction is checkable.
+
+It is the **least** similar pair in the table (0.471), and the closest pair is
+RMS with the Hilbert envelope (0.788). The cause is direct and measurable:
+`median + 5 robustSD` sits at about the **98th percentile** of an RMS trace and
+the **96th** of an energy trace, because squaring is not affine and stretches
+the upper tail relative to the median. So the same `k` is a materially more
+permissive operating point on the squared feature. On one recording
+short-time energy at 5.0 SD finds 294 events where RMS at 5.0 SD finds 132, and
+RMS has to come down to about 2.5 SD (250 events) before the counts are
+comparable. A test pins the asymmetry: at 50 robust SD the energy detector is
+silent and the squared one is still firing.
+
+**So do not read its F1 of 0.821 as a better detector.** §3 already showed that
+lower thresholds score higher F1 *on this simulator*, whose signal-to-noise
+distribution is a guess. Short-time energy is mostly the energy detector at an
+untuned, lower operating point. The generalisable conclusion is the one §3
+draws, strengthened: **a threshold in robust SDs is not a portable operating
+point between features.** Each feature needs its own sweep, and the two new
+detectors have not had one.
+
+### Ranking by votes rather than by rate
+
+`consensus_ranking` ranks channels by **how many detectors place them in their
+own top five**, not by an average of the four rates. Averaging would be wrong
+twice over: the features are on different scales — short-time energy is in
+µV²·samples — so a mean would be dominated by whichever has the largest units;
+and a detector that nearly duplicates another would be counted twice in it.
+Here each detector gets one vote, which is the right amount of influence for a
+fourth opinion that might be a second copy of the first.
+
+On seed 1, the three channels carrying implanted events take 4/4 votes and the
+top three places; the next two channels take 3/4 and carry nothing. Read the
+vote next to the matrix above: **unanimity among detectors that agree with each
+other on every event would not be unanimity, it would be one detector.** These
+four do not, which is what makes the vote worth counting.
+
+### What is missing
+
+All of the above is **synthetic**. The real-data agreement matrix — the one
+that matters, on ds003498 against the expert markings — needs one
+`onset-hfo benchmark` run on a machine with network access, and a threshold
+sweep for each of the two new features. Neither has been done. Until then, the
+two added detectors are machinery with a synthetic sanity check, not a result.
+
+---
+
 ## 2. What artifact rejection buys
 
 Same recording, RMS detector, with and without the validation stage:
@@ -375,7 +473,7 @@ unmeasured, and is the first experiment to run.
 
 ## 7. Test suite
 
-`pytest -q` — 314 tests, entirely offline. They cover the
+`pytest -q` — 342 tests, entirely offline. They cover the
 primitives (robust scale, sliding features, threshold segmentation, bipolar
 pairing), the detectors (hot channels found, events are oscillations, a flat
 channel yields nothing, thresholds behave monotonically, reruns are

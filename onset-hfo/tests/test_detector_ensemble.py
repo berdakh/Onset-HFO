@@ -1,0 +1,261 @@
+"""The two opt-in detectors, and the two ensemble metrics built on them.
+
+Roadmap item 4. The point of a third and fourth detector is not a better
+detector -- it is to find out whether the disagreement between the first two
+is *structural* or an accident of that pair, and the agreement matrix is what
+answers that. These tests pin the machinery; the measured answers live in
+``docs/EVALUATION.md`` §1b.
+"""
+
+from __future__ import annotations
+
+import numpy as np
+import pytest
+
+from onset_hfo.config import DetectorConfig, PipelineConfig
+from onset_hfo.detectors import DETECTORS, detect_hilbert, detect_short_time_energy
+from onset_hfo.detectors.base import (
+    robust_scale,
+    sliding_energy,
+    sliding_hilbert_envelope,
+    sliding_rms,
+)
+from onset_hfo.metrics import agreement_matrix, consensus_ranking
+from onset_hfo.pipeline import HFO_DETECTORS, run_pipeline
+
+HFO_NAMES = ("rms", "line_length", "hilbert", "short_time_energy")
+
+
+# --------------------------------------------------------------------------
+# The features
+# --------------------------------------------------------------------------
+
+
+def test_both_new_features_keep_the_signal_length():
+    x = np.random.default_rng(0).normal(size=512)
+    for feature in (sliding_hilbert_envelope, sliding_energy):
+        assert feature(x, 7).shape == x.shape
+
+
+def test_the_envelope_follows_a_burst_and_is_flat_elsewhere():
+    fs, n = 2000.0, 4000
+    t = np.arange(n) / fs
+    x = np.zeros(n)
+    burst = slice(1800, 2200)
+    x[burst] = np.sin(2 * np.pi * 150 * t[burst])
+    envelope = sliding_hilbert_envelope(x, 6)
+    assert envelope[burst].mean() > 20 * envelope[:1000].mean()
+
+
+def test_the_envelope_is_non_negative():
+    """It is a magnitude; a negative sample would mean the transform is wrong."""
+    x = np.random.default_rng(1).normal(size=1024)
+    assert (sliding_hilbert_envelope(x, 5) >= 0).all()
+
+
+def test_energy_is_the_square_of_rms_times_the_window():
+    """The identity that makes the two features monotone transforms."""
+    x = np.random.default_rng(2).normal(size=600)
+    window = 8
+    assert np.allclose(sliding_energy(x, window),
+                       sliding_rms(x, window) ** 2 * window)
+
+
+def test_the_robust_threshold_is_not_portable_between_those_two_features():
+    """The measured reason short-time energy is not a duplicate of RMS.
+
+    The features are monotone-related, so a *fixed* threshold would select
+    identical samples. ``median + k * robustSD`` does not, because squaring is
+    not affine -- and the direction matters: the same k is more permissive on
+    the squared feature.
+    """
+    rng = np.random.default_rng(3)
+    x = rng.normal(size=20000)
+    x[::500] *= 8  # a few bursts, as a real channel has
+
+    quantiles = []
+    for feature in (sliding_rms, sliding_energy):
+        trace = feature(x, 6)
+        centre, scale = robust_scale(trace)
+        threshold = float(np.squeeze(centre)) + 5.0 * float(np.squeeze(scale))
+        quantiles.append(float((trace < threshold).mean()))
+
+    rms_q, energy_q = quantiles
+    assert energy_q < rms_q, "energy at 5 SD should sit lower in its own distribution"
+
+
+# --------------------------------------------------------------------------
+# The detectors
+# --------------------------------------------------------------------------
+
+
+def test_both_new_detectors_are_registered_and_addressable():
+    for name in ("hilbert", "short_time_energy"):
+        assert name in DETECTORS
+        assert name in HFO_DETECTORS
+
+
+def test_the_default_pipeline_still_runs_exactly_two_detectors(recording):
+    """Adding detectors must not silently change every published number."""
+    result = run_pipeline(recording, verbose=False)
+    assert set(result.events) == {"rms", "line_length"}
+
+
+def test_the_new_detectors_are_opt_in_by_name(recording):
+    result = run_pipeline(recording, detectors=HFO_NAMES, verbose=False)
+    assert set(result.events) == set(HFO_NAMES)
+    for name in HFO_NAMES:
+        assert result.events[name], f"{name} found nothing at all"
+
+
+@pytest.mark.parametrize("detector", [detect_hilbert, detect_short_time_energy])
+def test_new_detectors_find_events_that_are_oscillations(prepared, detector):
+    events = detector(prepared, DetectorConfig())
+    assert events
+    assert all(e.n_peaks >= 6 for e in events)      # the oscillation criterion
+    assert all(e.stop > e.start for e in events)
+
+
+@pytest.mark.parametrize("detector", [detect_hilbert, detect_short_time_energy])
+def test_new_detectors_stamp_their_own_name(prepared, detector):
+    events = detector(prepared, DetectorConfig())
+    assert {e.detector for e in events} == {
+        "hilbert" if detector is detect_hilbert else "short_time_energy"}
+
+
+@pytest.mark.parametrize("detector", [detect_hilbert, detect_short_time_energy])
+def test_a_flat_channel_yields_nothing(prepared, detector):
+    """Zero signal must produce zero detections, not a divide-by-zero storm."""
+    import copy
+
+    flat = copy.copy(prepared)
+    flat.data = np.zeros_like(prepared.data[:2])
+    flat.ch_names = prepared.ch_names[:2]
+    flat.pairs = prepared.pairs[:2]
+    assert detector(flat, DetectorConfig()) == []
+
+
+def test_short_time_energy_still_fires_where_rms_is_silenced(prepared):
+    """The portability finding, as an executable statement.
+
+    At a threshold high enough to silence the energy detector completely, the
+    squared feature is still detecting -- because ``median + k * robustSD``
+    means something different on a distribution that squaring has stretched.
+    Anyone tempted to reuse a threshold across features should read this as
+    the counter-example.
+    """
+    from onset_hfo.detectors import detect_rms
+
+    cfg = DetectorConfig(threshold_sd=50.0)
+    assert detect_rms(prepared, cfg) == []
+    assert detect_short_time_energy(prepared, cfg) != []
+
+
+@pytest.mark.parametrize("detector", [detect_hilbert, detect_short_time_energy])
+def test_new_detectors_are_monotone_in_threshold(prepared, detector):
+    loose = detector(prepared, DetectorConfig(threshold_sd=3.0))
+    tight = detector(prepared, DetectorConfig(threshold_sd=8.0))
+    assert len(tight) <= len(loose)
+
+
+def test_new_detectors_have_a_config_slot_that_round_trips():
+    cfg = PipelineConfig()
+    assert cfg.hilbert.threshold_sd == 5.0
+    assert cfg.short_time_energy.threshold_sd == 5.0
+    as_dict = cfg.as_dict()
+    assert "hilbert" in as_dict and "short_time_energy" in as_dict
+
+
+# --------------------------------------------------------------------------
+# The agreement matrix
+# --------------------------------------------------------------------------
+
+
+@pytest.fixture(scope="module")
+def four(recording):
+    """One pipeline run with all four HFO detectors."""
+    result = run_pipeline(recording, detectors=HFO_NAMES, verbose=False)
+    return {name: result.events[name] for name in HFO_NAMES}, result
+
+
+def test_agreement_matrix_is_square_symmetric_and_unit_diagonal(four):
+    events, _ = four
+    matrix = agreement_matrix(events)
+    assert list(matrix.index) == list(matrix.columns) == list(HFO_NAMES)
+    assert np.allclose(np.diag(matrix.to_numpy()), 1.0)
+    assert np.allclose(matrix.to_numpy(), matrix.to_numpy().T, equal_nan=True)
+
+
+def test_agreement_with_itself_is_one():
+    from onset_hfo.detectors.base import Event
+
+    event = Event(channel="A1-A2", start=1.0, stop=1.05, detector="x", band=(80.0, 250.0))
+    matrix = agreement_matrix({"a": [event], "b": [event]})
+    assert matrix.loc["a", "b"] == pytest.approx(1.0)
+
+
+def test_agreement_between_disjoint_detectors_is_zero():
+    from onset_hfo.detectors.base import Event
+
+    def ev(start):
+        return Event(channel="A1-A2", start=start, stop=start + 0.02,
+                     detector="x", band=(80.0, 250.0))
+
+    matrix = agreement_matrix({"a": [ev(1.0)], "b": [ev(9.0)]})
+    assert matrix.loc["a", "b"] == pytest.approx(0.0)
+
+
+def test_agreement_of_two_empty_detectors_is_undefined_not_perfect():
+    """Two detectors that found nothing have not agreed about anything."""
+    matrix = agreement_matrix({"a": [], "b": []})
+    assert np.isnan(matrix.loc["a", "b"])
+
+
+# --------------------------------------------------------------------------
+# The consensus ranking
+# --------------------------------------------------------------------------
+
+
+def test_consensus_counts_detectors_not_events(four):
+    events, result = four
+    votes = consensus_ranking(events, duration_s=result.duration_s)
+    assert votes["n_detectors"].max() <= len(HFO_NAMES)
+    assert (votes["n_detectors"] >= 0).all()
+
+
+def test_consensus_puts_the_implanted_channels_on_top(four, recording):
+    """The vote must recover what the simulator implanted."""
+    events, result = four
+    votes = consensus_ranking(events, duration_s=result.duration_s)
+    hot = set(recording.marked_contacts)
+    top = votes.head(3)["channel"]
+    assert all(set(ch.split("-")) & hot for ch in top), \
+        f"consensus top-3 missed the implanted contacts: {list(top)}"
+
+
+def test_consensus_is_ordered_by_votes_then_mean_rank(four):
+    events, result = four
+    votes = consensus_ranking(events, duration_s=result.duration_s)
+    keys = list(zip(-votes["n_detectors"], votes["mean_rank"], strict=True))
+    assert keys == sorted(keys)
+
+
+def test_a_channel_no_detector_saw_ranks_below_everything_seen(four):
+    events, result = four
+    votes = consensus_ranking(events, duration_s=result.duration_s)
+    assert votes["n_detectors"].iloc[-1] <= votes["n_detectors"].iloc[0]
+
+
+def test_consensus_of_nothing_is_an_empty_frame_with_columns():
+    frame = consensus_ranking({}, duration_s=60.0)
+    assert frame.empty
+    assert {"channel", "n_detectors", "mean_rank"} <= set(frame.columns)
+
+
+def test_consensus_keeps_the_per_detector_rates_it_voted_on(four):
+    """A vote a reader cannot audit is worse than no vote."""
+    events, result = four
+    votes = consensus_ranking(events, duration_s=result.duration_s)
+    for name in HFO_NAMES:
+        assert f"rate_{name}" in votes.columns
+        assert f"rank_{name}" in votes.columns
