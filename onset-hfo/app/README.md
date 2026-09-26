@@ -1,5 +1,9 @@
 # `app/` — the reading interface
 
+**Live: [https://onsetnu.streamlit.app/](https://onsetnu.streamlit.app/)**
+
+Locally:
+
 ```bash
 pip install -e ".[app]"
 streamlit run app/Home.py
@@ -19,7 +23,7 @@ your GitHub account connected:
 | Repository | `berdakh/onset-hfo` |
 | Branch | `master` |
 | **Main file path** | **`onset-hfo/app/Home.py`** |
-| App URL | your choice, e.g. `berdakh-onset-hfo` |
+| App URL | `onsetnu` — the deployed instance |
 
 That is the whole configuration. The path is the one thing that catches
 people: the Python project lives in a subdirectory, so the entrypoint is
