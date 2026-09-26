@@ -17,13 +17,20 @@
                       │    comparison.csv  provenance.json ...   │
                       └───────────────┬──────────────────────────┘
                                       │ read-only, via ResultStore
-                                      ▼
-                      ┌──────────────────────────────────────────┐
-                      │  onset_agent  (an open-weight LLM)       │
-                      │  8 read-only tools · scope refusals ·    │
-                      │  citation + number verification          │
-                      └──────────────────────────────────────────┘
+                         ┌────────────┴────────────┐
+                         ▼                         ▼
+       ┌──────────────────────────────┐  ┌────────────────────────────┐
+       │  onset_agent (open-weight)   │  │  app/  (reading interface) │
+       │  8 read-only tools · scope   │  │  ranking · evidence ·      │
+       │  refusals · citation and     │  │  disagreements · agent ·   │
+       │  number verification         │  │  report — shows, decides   │
+       └──────────────────────────────┘  │  nothing                   │
+                                         └────────────────────────────┘
 ```
+
+Both consumers go through the same read-only boundary, and neither can change
+a number. That is the whole reason `ResultStore` exists: a second reader is
+where a project usually grows a second source of truth, and here it cannot.
 
 ## Why the two halves are separate
 
@@ -99,6 +106,28 @@ else in the codebase, that is a bug.
 **Times are always original-recording seconds.** Every event, window and
 figure. The slice offset is added once, at load, and never thought about
 again.
+
+## The interface
+
+`app/` is a Streamlit page over one saved analysis:
+`streamlit run app/onset_app.py`, after `pip install -e ".[app]"`.
+
+It exists because every number this project produces already carried its
+signal window — but only inside a JSON file, which makes "evidence-based" a
+claim rather than something a reader can check. On the page a rate leads to
+the events behind it, an event leads to the signal it was measured on, and an
+agent answer's citations expand to both.
+
+Everything the page decides lives in `app/panels.py`, which imports no
+Streamlit and is therefore tested offline (`tests/test_app.py`). The page
+itself was checked by driving Chromium against a running server — loading it,
+opening each tab, rendering an event figure, asking the agent a scoped
+question and an out-of-scope one, and expanding a citation to its window.
+That is not a CI test; it is how the screenshots in the pull request were
+produced, and it is the way to verify a change to `onset_app.py`.
+
+`app/README.md` has the one rule the page is built on and its single
+documented exception.
 
 ## Running it
 

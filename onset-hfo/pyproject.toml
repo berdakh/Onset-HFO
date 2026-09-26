@@ -30,6 +30,11 @@ llm = ["transformers>=4.44", "torch>=2.2", "accelerate>=0.33"]
 # Notebooks.
 notebook = ["jupyter>=1.0", "ipywidgets>=8.1"]
 
+# The reading interface (app/). Kept out of the core install because the
+# pipeline, the agent and every study run without it -- the page is a way of
+# reading results, not a way of producing them.
+app = ["streamlit>=1.30"]
+
 # The learned per-contact model, its calibration and its conformal sets.
 # Everything else in the package runs without these.
 ml = ["scikit-learn>=1.3"]

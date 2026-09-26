@@ -11,6 +11,17 @@ transfer gap, what a handful of labels buys, calibration, the agent, and the
 attempts to break it. Every section ends with what the result actually
 justifies claiming. It is self-contained — one file, no build step.
 
+## "I just want to click around in it"
+
+```bash
+pip install -e ".[app]"
+streamlit run app/onset_app.py
+```
+
+The reading interface: a saved analysis on a page, where a rate leads to the
+events behind it and an event leads to the signal it was measured on. See
+[`app/README.md`](../app/README.md).
+
 ## "I just want to see it work"
 
 Open [`notebooks/01_hfo_detection_quickstart.ipynb`](../notebooks/01_hfo_detection_quickstart.ipynb)
@@ -68,6 +79,7 @@ Read in this order:
 | What does the report contain? | [`onset_hfo/report.py`](../onset_hfo/report.py) |
 | Which contacts were resected, and how is that mapped to channels? | [`onset_hfo/clinical.py`](../onset_hfo/clinical.py) |
 | How is the outcome study computed, and what are its statistics? | [`onset_hfo/outcome.py`](../onset_hfo/outcome.py) |
+| What does the interface decide, and what does it only display? | [`app/panels.py`](../app/panels.py) |
 | Does a result survive a change of analysis window? | [`onset_hfo/stability.py`](../onset_hfo/stability.py) |
 
 ## A note on how this repository is written
