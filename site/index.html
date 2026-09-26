@@ -192,7 +192,7 @@ python -m onset_hfo.cli run --synthetic --figures     # offline, ~10 seconds
 python -m onset_hfo.cli run --subject sub-pt01 --start 50 --stop 110
 python -m onset_agent.cli --results artifacts/results/sub-pt01_ictal_run-01 --demo
 python -m onset_hfo.cli outcome                       # the outcome study
-pytest -q                                             # 236 tests, offline</code></pre>
+pytest -q                                             # 285 tests, offline</code></pre>
 
 <h2>What one detection looks like</h2>
 <p>
@@ -239,8 +239,11 @@ pytest -q                                             # 236 tests, offline</code
     predicts &mdash; the study this dataset comes from &mdash; and with 13
     patients against 7 it does not reach significance. This cohort can only
     detect AUC&nbsp;&ge;&nbsp;0.85 at 80% power, so it could not have
-    established either number. <strong>Nothing in the study reaches
-    p&nbsp;&lt;&nbsp;0.05.</strong>
+    established either number. <strong>Nothing in the study survives
+    correction for multiple comparisons.</strong> One of the 36 comparisons the
+    study runs reaches p&nbsp;=&nbsp;0.034 uncorrected &mdash; our detector,
+    ripple band, candidate-set metric &mdash; which is fewer than the roughly
+    two that 36 tests produce by chance, and its Bonferroni-corrected p is 1.00.
   </p>
   <p>
     <strong>The most useful result is that an earlier version of this table
