@@ -54,11 +54,43 @@ COHORT = PROJECT_ROOT / "data" / "outcome"
 #: reference counts it was scored against.
 BENCHMARK = PROJECT_ROOT / "data" / "benchmark"
 
+# --------------------------------------------------------------------------
+# The standing disclaimer -- the canonical copy
+# --------------------------------------------------------------------------
+#
+# DUPLICATION.md item 5. The same disclaimer is shown by berdakh/onset's
+# app/common.py. This is the copy of record: the structure below is fixed, and
+# the *only* part the teaching prototype changes is DATA_SENTENCE, because it
+# runs on a synthetic cohort and must not claim otherwise. If you edit anything
+# but DATA_SENTENCE here, edit the twin too -- see docs/DUPLICATION.md, which
+# carries both wordings side by side so neither has to be reconstructed.
+#
+# It lives here rather than in common.py for the reason this module exists:
+# common.py imports Streamlit, CI does not install Streamlit, and a test
+# that reaches for the most important sentence in the product must not need
+# a browser library to read it.
+
+#: Fixed. Names the thing and refuses the category, in that order.
+DISCLAIMER_LEAD = "Research prototype — not a medical device."
+
+#: The one line that legitimately differs between the two apps.
+DATA_SENTENCE = ("Real public recordings, real expert markings, real surgical "
+                 "outcomes — and nothing here is validated for clinical use.")
+
+#: Fixed. The evidence rule, then the sentence that matters most: the product
+#: contains no recommendation, as against containing one that is hedged.
+DISCLAIMER_TAIL = ("Every number cites the window it came from. There is no "
+                   "recommendation anywhere in this product; the clinician "
+                   "decides.")
+
 __all__ = [
     "EXAMPLE",
     "STUDIES",
     "COHORT",
     "BENCHMARK",
+    "DISCLAIMER_LEAD",
+    "DATA_SENTENCE",
+    "DISCLAIMER_TAIL",
     "sweep",
     "sweep_grid",
     "benchmark_cohort",

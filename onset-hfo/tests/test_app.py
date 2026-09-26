@@ -176,6 +176,29 @@ def test_panels_never_imports_streamlit():
     assert "streamlit" not in imported, \
         "app/panels.py must import no Streamlit: the tests run where it is absent"
 
+
+def test_no_test_in_this_file_imports_the_streamlit_half_of_the_app():
+    """The other direction of the same rule, and the one that bit twice.
+
+    `test_panels_never_imports_streamlit` stops a constant drifting into
+    `common.py`. It does not stop a *test* importing `common.py` to reach one,
+    which passes locally -- where Streamlit happens to be installed -- and
+    fails in CI, where the `dev` extra does not install it. Three tests did
+    exactly that; the constants they wanted now live in `panels.py`.
+    """
+    import ast
+
+    tree = ast.parse(Path(__file__).read_text())
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and (node.module or "").startswith("app"):
+            names = {alias.name for alias in node.names}
+            assert "common" not in names and node.module != "app.common", \
+                "this file must not import app.common: CI has no Streamlit"
+        elif isinstance(node, ast.Import):
+            assert not any(alias.name.startswith("app.common")
+                           for alias in node.names), \
+                "this file must not import app.common: CI has no Streamlit"
+
 def test_the_example_analysis_ships_and_loads():
     """Every page must work on a fresh clone, with no download.
 
@@ -562,11 +585,14 @@ def _duplication_plan() -> str:
 
 
 def test_the_disclaimer_is_assembled_from_the_canonical_constants():
-    """No page may carry a second copy of the sentence that matters most."""
-    from app import common
+    """No page may carry a second copy of the sentence that matters most.
 
+    Read as text rather than imported: `app/common.py` imports Streamlit and
+    CI does not install it. That is also why the constants live in
+    `panels.py`.
+    """
     source = (Path(__file__).resolve().parents[1] / "app" / "common.py").read_text()
-    assert source.count(common.DISCLAIMER_LEAD) == 1, \
+    assert panels.DISCLAIMER_LEAD not in source, \
         "the banner restates the disclaimer instead of using DISCLAIMER_LEAD"
     assert "{DISCLAIMER_LEAD}" in source and "{DATA_SENTENCE}" in source, \
         "the banner does not interpolate the canonical constants"
@@ -574,9 +600,8 @@ def test_the_disclaimer_is_assembled_from_the_canonical_constants():
 
 def test_the_disclaimer_still_says_there_is_no_recommendation():
     """The one sentence this whole product is organised around."""
-    from app import common
-
-    whole = f"{common.DISCLAIMER_LEAD} {common.DATA_SENTENCE} {common.DISCLAIMER_TAIL}"
+    whole = (f"{panels.DISCLAIMER_LEAD} {panels.DATA_SENTENCE} "
+             f"{panels.DISCLAIMER_TAIL}")
     assert "not a medical device" in whole
     assert "no recommendation anywhere in this product" in whole
     assert "the clinician decides" in whole
@@ -584,12 +609,10 @@ def test_the_disclaimer_still_says_there_is_no_recommendation():
 
 def test_the_duplication_plan_quotes_the_wording_the_code_ships():
     """The plan is the other repository's only source for this text."""
-    from app import common
-
     plan = _duplication_plan()
-    assert common.DATA_SENTENCE in plan, \
+    assert panels.DATA_SENTENCE in plan, \
         "DUPLICATION.md quotes a DATA_SENTENCE the app no longer uses"
-    assert "There is no " in common.DISCLAIMER_TAIL
+    assert "There is no " in panels.DISCLAIMER_TAIL
 
 
 def test_the_plan_records_which_half_of_each_item_is_done():
