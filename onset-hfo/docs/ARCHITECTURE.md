@@ -109,10 +109,10 @@ again.
 
 ## The interface
 
-`app/` is a Streamlit page over one saved analysis:
-`streamlit run app/onset_app.py`, after `pip install -e ".[app]"`.
+`app/` is a nine-page Streamlit app over real results:
+`streamlit run app/Home.py`, after `pip install -e ".[app]"`.
 
-It exists because every number this project produces already carried its
+It mirrors the page order of the Onset prototype (`berdakh/onset`) so the two can be read side by side and eventually merged, with real recordings underneath instead of a synthetic cohort. It exists because every number this project produces already carried its
 signal window — but only inside a JSON file, which makes "evidence-based" a
 claim rather than something a reader can check. On the page a rate leads to
 the events behind it, an event leads to the signal it was measured on, and an
@@ -124,7 +124,7 @@ itself was checked by driving Chromium against a running server — loading it,
 opening each tab, rendering an event figure, asking the agent a scoped
 question and an out-of-scope one, and expanding a citation to its window.
 That is not a CI test; it is how the screenshots in the pull request were
-produced, and it is the way to verify a change to `onset_app.py`.
+produced, and it is the way to verify a change to any page.
 
 `app/README.md` has the one rule the page is built on and its single
 documented exception.

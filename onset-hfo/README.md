@@ -88,7 +88,7 @@ python -m onset_hfo.cli benchmark
 python -m onset_hfo.cli outcome
 
 # 10. read a saved analysis on a page, with the signal behind every number
-pip install -e ".[app]" && streamlit run app/onset_app.py
+pip install -e ".[app]" && streamlit run app/Home.py
 
 pytest -q        # 236 tests, all offline
 ```
@@ -157,7 +157,8 @@ The direction is the one [Fedele et al. 2017](https://www.nature.com/articles/s4
 predicts — the study this dataset comes from — and with 13 patients against 7
 it does not reach significance. `min_detectable_auc(13, 7)` is **0.85**, so
 this cohort could not have established either number. Nothing in the study
-reaches p < 0.05.
+survives correction for the 36 comparisons the study runs: one row reaches
+p = 0.034 uncorrected, and chance alone produces about two.
 
 **The most useful result is that an earlier version of this table said
 something stronger.** On the first 60 seconds of the same recordings, the same
@@ -197,7 +198,7 @@ answer holds for 18 of 20 patients (experts) and 16 of 20 (ours) — against
 the median candidate set from 2 channels to 1 and the worst case from 24 to 5.
 So the quantity measured here is a property of the **patient**, not of the
 recording session; a minute was simply too short a unit. It still does not
-predict outcome at p < 0.05 on twenty patients — nothing here does.
+predict outcome on twenty patients — nothing here survives correction.
 
 ```bash
 python -m onset_hfo.cli stability --across-runs 5   # 92 runs, disk-pruned
@@ -313,9 +314,15 @@ onset_agent/          the agent
   scoring.py          ranking vs clinician SOZ labels, with a permutation null
   orchestrate.py      python -m onset_agent.orchestrate ...
 
-app/                  the reading interface (Streamlit)
+app/                  the reading interface (Streamlit), nine pages
+  Home.py             the landing page
+  common.py           banner, analysis picker, committed-study loader
   panels.py           everything the page decides; imports no Streamlit, so it is tested
-  onset_app.py        the page itself: ranking, evidence, disagreements, agent, report
+  signal.py           the one place the interface touches the recording again
+  pages/              Recording · Report · Assistant · Detectors · Outcome
+                      Data · Architecture · Research
+
+data/example_analysis/  a real 60 s analysis, so the app works on a fresh clone
 
 notebooks/            the five Colab notebooks (built by scripts/build_notebooks.py)
 tests/                236 offline tests (synthetic data + a mock model server)

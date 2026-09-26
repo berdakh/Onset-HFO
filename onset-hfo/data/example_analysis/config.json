@@ -1,0 +1,76 @@
+{
+  "pipeline_version": "0.1.0",
+  "config": {
+    "preprocess": {
+      "line_freq": 60.0,
+      "notch": true,
+      "bipolar": true,
+      "highpass": 1.0,
+      "drop_bads": true
+    },
+    "rms": {
+      "band": [
+        80.0,
+        250.0
+      ],
+      "rms_window_ms": 3.0,
+      "threshold_sd": 5.0,
+      "extend_sd": 2.0,
+      "peak_threshold_sd": 2.0,
+      "min_peaks": 6,
+      "min_duration_ms": 6.0,
+      "max_duration_ms": 200.0,
+      "merge_gap_ms": 10.0,
+      "baseline": "robust"
+    },
+    "line_length": {
+      "band": [
+        80.0,
+        250.0
+      ],
+      "rms_window_ms": 3.0,
+      "threshold_sd": 3.0,
+      "extend_sd": 2.0,
+      "peak_threshold_sd": 2.0,
+      "min_peaks": 6,
+      "min_duration_ms": 6.0,
+      "max_duration_ms": 200.0,
+      "merge_gap_ms": 10.0,
+      "baseline": "robust"
+    },
+    "spikes": {
+      "band": [
+        5.0,
+        60.0
+      ],
+      "threshold_sd": 6.0,
+      "slope_sd": 5.0,
+      "min_duration_ms": 10.0,
+      "max_duration_ms": 200.0,
+      "refractory_ms": 200.0,
+      "max_raw_jump_sd": 10.0
+    },
+    "validation": {
+      "min_peak_prominence_db": 4.0,
+      "max_low_band_sd": 8.0,
+      "min_cycles": 2.0
+    },
+    "rate_window_s": 60.0,
+    "top_k": 5,
+    "disagreement_ranks": 5
+  },
+  "preprocessing": [
+    "kept 89 intracranial channels; dropped 9 non-brain channels (DC/trigger/ECG/misc)",
+    "dropped 4 channels flagged bad by the dataset: G5, G6, RQ1, RQ2",
+    "high-pass 1 Hz (zero-phase FIR)",
+    "notch 60 Hz + harmonics (60, 120, 180, 240, 300, 360, 420 Hz, 2 Hz wide)",
+    "bipolar montage: 71 pairs of neighbouring contacts"
+  ],
+  "timings_s": {
+    "preprocess": 0.7780398370000512,
+    "bandpass": 0.29133136700011164,
+    "detect_rms": 2.272117994999917,
+    "detect_line_length": 2.8017858710004475,
+    "detect_spikes": 1.338065201000063
+  }
+}

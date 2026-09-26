@@ -22,7 +22,7 @@ this project could ship. It derives nothing new: it reads the counts and
 intervals already in ``rates_*.csv`` through a library function the tests
 cover. Treat any second exception as a bug.
 
-Re-rendering a signal window (``app/onset_app.py``) is not an exception to
+Re-rendering a signal window (``app/signal.py``) is not an exception to
 this rule either. The event's times, frequency and amplitude all come from the
 store; the signal is fetched again only so the reader can *look* at the window
 the numbers describe. Nothing is re-detected.
@@ -109,7 +109,8 @@ def ranking_table(store: ResultStore, detector: str | None = None) -> pd.DataFra
         if column in lookup.columns:
             frame[label] = [lookup.at[c, column] if c in lookup.index else None
                             for c in frame["channel"]]
-    return frame
+    return frame.round({"rate_per_min": 2, "ci_low": 2, "ci_high": 2,
+                        "mean_freq_hz": 1, "mean_duration_ms": 1})
 
 
 def leader_note(store: ResultStore, detector: str | None = None) -> dict:

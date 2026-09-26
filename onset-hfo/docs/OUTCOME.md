@@ -19,8 +19,9 @@ Everything below comes out of that command. Tables are in
 
 ## The headline, in one paragraph
 
-**Nothing here separates the groups at p < 0.05, and the most important
-finding is that an earlier version of this analysis did.** On the whole
+**Nothing here separates the groups in a way that survives correction, and the
+most important finding is that an earlier version of this analysis appeared
+to.** On the whole
 recording (300 s per patient, every expert marking), the channel with the
 most expert-marked fast ripples was inside the resection in 11 of 13 patients
 who became seizure-free and 3 of 7 whose seizures returned — AUC 0.71, 95% CI
@@ -139,8 +140,10 @@ surviving preprocessing.
 | rms | ripple | reviewed | 0.48 | 0.38 | 0.52 (0.24–0.79) | 0.94 |
 
 `top3_resected` sits between the two (expert fast ripple AUC 0.63, p = 0.35).
-Nothing in any arm reaches p < 0.05. The full table — every metric, source,
-scope and band — is `groups.csv`.
+Of the 36 comparisons in the full table, **one** reaches p < 0.05 — our
+detector, ripple band, `candidates_resected`, p = 0.034, Bonferroni 1.00 — and
+chance alone would produce about two. Every metric, source, scope and band is
+in `groups.csv`.
 
 ---
 
@@ -319,8 +322,11 @@ Fast-ripple band, reviewed channels, whole runs:
 | rms | `top_channel_resected` | 0.77 | 0.43 | 0.670 (0.45–0.89) | 0.17 |
 | rms | `candidates_resected` | 0.77 | 0.50 | 0.670 (0.41–0.91) | 0.20 |
 
-AUC moves by 0.017 for the experts and not at all for us. **Being honest about
-ties is nearly free**, which is the argument for doing it: the per-patient
+AUC moves by 0.017 for the experts and not at all for us in the fast-ripple
+band. (In the *ripple* band the same metric is our detector's best row in the
+whole study, p = 0.034 uncorrected — see the caution above: one hit in 36
+comparisons is what chance produces.) **Being honest about ties is nearly
+free**, which is the argument for doing it: the per-patient
 statement becomes true without the cohort-level claim getting weaker.
 
 `candidates_all_resected` — was the *whole* tied set removed? — is the more
@@ -437,8 +443,8 @@ together.
 | rms | `candidates_resected` | 0.74 | 0.50 | 0.632 | 0.36 |
 | rms | `top_channel_resected` (ripple) | 0.62 | 0.14 | 0.736 | 0.07 |
 
-**Nothing reaches p < 0.05.** The minimum across the whole pooled table is
-0.070. Pooling actually *lowers* the expert argmax arm (0.709 on a single run
+**Nothing in the pooled table reaches p < 0.05**; its minimum is 0.070.
+Pooling actually *lowers* the expert argmax arm (0.709 on a single run
 to 0.637), because the recurrence group's mean rises from 0.43 to 0.57 — with
 more data, more recurrence patients turn out to have had their busiest
 fast-ripple channel removed, which is evidence against the hypothesis rather
@@ -516,9 +522,11 @@ conclusion when you give it more data has earned its place.
   reaches 80% power. A p above 0.05 here means "underpowered", not "no
   effect". Every row carries an effect size and a bootstrap CI for that
   reason.
-- **Twenty-four comparisons, uncorrected.** The Bonferroni column is in the
-  table; on the full run nothing survives it, and nothing reaches p < 0.05
-  uncorrected either. Read every row as hypothesis-generating.
+- **Thirty-six comparisons, uncorrected.** The Bonferroni column is in the
+  table and **nothing survives it**. One row reaches p < 0.05 uncorrected (our
+  detector, ripple band, `candidates_resected`, p = 0.034), which is fewer than
+  the ~2 that 36 tests produce by chance. Read every row as
+  hypothesis-generating.
 - **The published headline changed once already.** The 60-second version of
   this analysis reported AUC 0.82, p = 0.007 and it reached the project's
   README and landing page before the full run was done. Both are now corrected

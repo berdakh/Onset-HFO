@@ -11,6 +11,8 @@ interface shows what the pipeline wrote and does not compute a second answer.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 import pytest
 
@@ -141,6 +143,63 @@ def test_an_invented_citation_is_flagged_rather_than_dropped(store):
     """A row that does not resolve is a guard failure worth seeing on the page."""
     rows = panels.citations(store, ["sub-xx|MADE-UP|rms|0.000"])
     assert rows[0]["resolved"] is False
+
+
+# -- what ships with the source -------------------------------------------
+
+def test_the_example_analysis_ships_and_loads():
+    """Every page must work on a fresh clone, with no download.
+
+    The Onset prototype builds a synthetic cohort at startup; this one cannot
+    generate real recordings, so a real analysis is committed instead.
+    """
+    from app.common import EXAMPLE
+    from onset_hfo.store import ResultStore
+
+    assert EXAMPLE.exists(), "the shipped example analysis is missing"
+    shipped = ResultStore(EXAMPLE)
+    assert len(shipped.events) and shipped.detectors()
+    assert str(shipped.provenance.get("source", "")).startswith("openneuro:"), \
+        "the shipped example must be real data, not a simulation"
+
+
+def test_the_committed_studies_are_readable():
+    """The Outcome page reads these rather than rerunning a 90-minute sweep."""
+    import pandas as pd
+
+    from app.common import STUDIES
+
+    groups = pd.read_csv(STUDIES / "outcome_groups_300s.csv")
+    assert {"source", "metric", "auc", "p_permutation", "p_bonferroni"} <= set(groups.columns)
+    # Nothing survives correction. This assertion exists because the docs said
+    # "nothing reaches p < 0.05" for two PRs after a metric was added that made
+    # one row do so uncorrected; the claim the pages actually rest on is this
+    # one, so it is the one under test.
+    assert not (groups["p_bonferroni"] < 0.05).any(), \
+        "a result now survives Bonferroni; every page claiming otherwise must change"
+    uncorrected = int((groups["p_permutation"] < 0.05).sum())
+    assert uncorrected <= len(groups) * 0.05 + 2, \
+        "more uncorrected hits than chance explains; the pages must say so"
+
+
+def test_a_gzipped_analysis_loads_like_a_plain_one(tmp_path, store):
+    """The example ships gzipped, so the store has to read both."""
+    import gzip
+    import shutil
+
+    from onset_hfo.store import ResultStore
+
+    target = tmp_path / "gzipped"
+    target.mkdir()
+    for path in Path(store.dir).iterdir():
+        if path.suffix == ".csv":
+            with path.open("rb") as src, gzip.open(target / f"{path.name}.gz", "wb") as dst:
+                shutil.copyfileobj(src, dst)
+        elif path.is_file():
+            shutil.copy(path, target / path.name)
+    zipped = ResultStore(target)
+    assert len(zipped.events) == len(store.events)
+    assert sorted(zipped.rates) == sorted(store.rates)
 
 
 # -- re-loading the signal -------------------------------------------------
