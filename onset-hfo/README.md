@@ -87,6 +87,9 @@ python -m onset_hfo.cli benchmark
 # 9. test the HFO map against what happened to the patients after surgery
 python -m onset_hfo.cli outcome
 
+# 10. read a saved analysis on a page, with the signal behind every number
+pip install -e ".[app]" && streamlit run app/onset_app.py
+
 pytest -q        # 236 tests, all offline
 ```
 
@@ -262,6 +265,7 @@ chance — see [`docs/EVALUATION.md`](docs/EVALUATION.md).
 | [`docs/LIMITATIONS.md`](docs/LIMITATIONS.md) | what this must not be used for |
 | [`docs/GLOSSARY.md`](docs/GLOSSARY.md) | the clinical and signal-processing vocabulary, defined |
 | [`docs/ROADMAP.md`](docs/ROADMAP.md) | what to build next, in order, with the reasoning |
+| [`app/README.md`](app/README.md) | the reading interface: what it shows, and the one rule it is built on |
 | [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md) | how to add a detector, a dataset or a tool without breaking the contracts |
 
 ## Layout
@@ -308,6 +312,10 @@ onset_agent/          the agent
   verifier.py         deterministic + language-model verifiers, and their delta
   scoring.py          ranking vs clinician SOZ labels, with a permutation null
   orchestrate.py      python -m onset_agent.orchestrate ...
+
+app/                  the reading interface (Streamlit)
+  panels.py           everything the page decides; imports no Streamlit, so it is tested
+  onset_app.py        the page itself: ranking, evidence, disagreements, agent, report
 
 notebooks/            the five Colab notebooks (built by scripts/build_notebooks.py)
 tests/                236 offline tests (synthetic data + a mock model server)

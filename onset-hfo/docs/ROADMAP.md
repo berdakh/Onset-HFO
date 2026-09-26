@@ -256,17 +256,41 @@ and two verifiers with a measured delta between them. See
 
 ---
 
-## 9. Interface
+## 9. Interface — *done*
 
-**Why.** Everything here is a notebook or a CLI. The Onset project has a
-Streamlit application; this pipeline should feed it.
+**Status.** `app/` — `streamlit run app/onset_app.py`, installed with
+`pip install -e ".[app]"`. Five tabs: ranking (with intervals and the "does
+anything stand out?" verdict above the table), evidence (a channel's citable
+events and the three-panel figure for the one you pick), disagreements (both
+ranks, neither preferred), the agent (every citation expands to its stored
+record *and* its signal window), and the report as written.
 
-**What.** A page that loads a saved results directory, shows the ranking, the
-event figure on click, the disagreements, and the agent's chat box — with
-every answer's citations resolving to the window the reader can see. Reuse
-`ResultStore`; do not let the UI compute anything.
+**What it is for.** Every number this project produces already carried the
+signal window behind it, but only inside a JSON file — a reader could not
+*look* at the window without writing code, which makes "evidence-based" a
+claim rather than a property. The page closes that gap.
 
-**Touches.** new `app/`, reusing `onset_hfo/store.py` and `viz.py`.
+**The rule held.** Everything comes through `ResultStore` via `app/panels.py`,
+which imports no Streamlit and is therefore tested offline. The page has no
+thresholds and no analysis of its own, so it cannot disagree with the report
+it displays. One documented exception: `leader_note` runs
+`metrics.leader_separation` on the stored rate table, because a page that
+showed a ranking without the "are they all tied?" verdict would be the most
+misleading thing this project could ship.
+
+**What building it caught.** The first version constructed the event for the
+figure from times alone, so the figure printed `peak nan Hz, nan dB over
+background` directly beneath a panel showing 192 Hz and 12.5 dB.
+`panels.event_from_record` now copies every stored field, with a test named
+after the incident. Two numbers disagreeing on one screen is the failure this
+project is organised against, and an interface is where it surfaces.
+
+**What is left.** The cohort studies (benchmark, outcome, stability) have no
+page — the picker skips those directories rather than offering them and
+failing to load. That is the obvious next screen, and it is where the
+project's most interesting output currently lives.
+
+**Touches.** `app/`, reusing `onset_hfo/store.py`, `viz.py` and `metrics.py`.
 
 ---
 
