@@ -34,9 +34,22 @@ from pathlib import Path
 
 import pandas as pd
 
+from onset_hfo.config import PROJECT_ROOT, RESULTS_DIR
 from onset_hfo.store import ResultStore
 
+#: A real 60 s analysis that ships with the source, so every page works on a
+#: fresh clone with no download: OpenNeuro ds003029, the slice the quickstart
+#: documents, gzipped.
+EXAMPLE = PROJECT_ROOT / "data" / "example_analysis"
+
+#: Cohort-study tables, committed so the evaluation and outcome pages need no
+#: download and no 90-minute rerun.
+STUDIES = PROJECT_ROOT / "data" / "stability"
+
 __all__ = [
+    "EXAMPLE",
+    "STUDIES",
+    "analyses",
     "find_results",
     "detector_band",
     "event_from_record",
@@ -64,6 +77,20 @@ def find_results(root: str | Path) -> list[Path]:
         return []
     found = [p for p in root.iterdir() if p.is_dir() and (p / "events.csv").exists()]
     return sorted(found, key=lambda p: p.stat().st_mtime, reverse=True)
+
+
+def analyses() -> list[Path]:
+    """Every saved analysis: the shipped example first, then anything local.
+
+    Lives here rather than beside the page because it is a fact about the
+    filesystem, not a decision about layout -- and because this module must
+    import without Streamlit, which is what lets the tests run in CI where
+    Streamlit is not installed.
+    """
+    found = find_results(RESULTS_DIR)
+    if EXAMPLE.exists() and EXAMPLE not in found:
+        found = [EXAMPLE, *found]
+    return found
 
 
 def metadata_rows(store: ResultStore) -> list[tuple[str, str]]:

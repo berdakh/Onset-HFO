@@ -147,13 +147,33 @@ def test_an_invented_citation_is_flagged_rather_than_dropped(store):
 
 # -- what ships with the source -------------------------------------------
 
+def test_panels_never_imports_streamlit():
+    """The whole reason `panels.py` exists, asserted rather than assumed.
+
+    CI installs the `dev` extra, which has no Streamlit. A path constant put
+    in `common.py` (which does import it) failed there while passing locally,
+    because the local environment happened to have Streamlit installed. This
+    is the guard that stops that recurring.
+    """
+    import ast
+
+    tree = ast.parse(Path(panels.__file__).read_text())
+    imported = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            imported |= {alias.name.split(".")[0] for alias in node.names}
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            imported.add(node.module.split(".")[0])
+    assert "streamlit" not in imported, \
+        "app/panels.py must import no Streamlit: the tests run where it is absent"
+
 def test_the_example_analysis_ships_and_loads():
     """Every page must work on a fresh clone, with no download.
 
     The Onset prototype builds a synthetic cohort at startup; this one cannot
     generate real recordings, so a real analysis is committed instead.
     """
-    from app.common import EXAMPLE
+    from app.panels import EXAMPLE
     from onset_hfo.store import ResultStore
 
     assert EXAMPLE.exists(), "the shipped example analysis is missing"
@@ -167,7 +187,7 @@ def test_the_committed_studies_are_readable():
     """The Outcome page reads these rather than rerunning a 90-minute sweep."""
     import pandas as pd
 
-    from app.common import STUDIES
+    from app.panels import STUDIES
 
     groups = pd.read_csv(STUDIES / "outcome_groups_300s.csv")
     assert {"source", "metric", "auc", "p_permutation", "p_bonferroni"} <= set(groups.columns)

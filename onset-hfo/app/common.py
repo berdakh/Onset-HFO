@@ -17,17 +17,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import streamlit as st  # noqa: E402
 
-from app import panels  # noqa: E402
-from onset_hfo.config import PROJECT_ROOT, RESULTS_DIR  # noqa: E402
+from app.panels import EXAMPLE, STUDIES, analyses  # noqa: E402,F401
 from onset_hfo.store import ResultStore  # noqa: E402
-
-#: Ships with the source so every page works on a fresh clone: 60 s of
-#: sub-pt01 from OpenNeuro ds003029, the same slice the quickstart documents.
-EXAMPLE = PROJECT_ROOT / "data" / "example_analysis"
-
-#: Cohort-study tables, committed so the evaluation and outcome pages need no
-#: download and no 90-minute rerun.
-STUDIES = PROJECT_ROOT / "data" / "stability"
 
 
 def banner() -> None:
@@ -49,14 +40,6 @@ def banner() -> None:
 @st.cache_resource(show_spinner=False)
 def load_store(directory: str) -> ResultStore:
     return ResultStore(directory)
-
-
-def analyses() -> list[Path]:
-    """Every saved analysis: the shipped example first, then anything produced locally."""
-    found = panels.find_results(RESULTS_DIR)
-    if EXAMPLE.exists() and EXAMPLE not in found:
-        found = [EXAMPLE, *found]
-    return found
 
 
 def pick_analysis() -> ResultStore | None:
