@@ -397,8 +397,16 @@ THRESHOLDS: dict[str, float] = {
     #
     # The gap between this and ``interictal-agreement`` is the practical
     # point: at 2.0 SD the fast-ripple detector runs at precision 0.086 and
-    # returns ~1,140 detections per 60 s against ~70 expert events. One
-    # threshold for both bands is not a simplification, it is a bug.
+    # returns ~1,140 detections per 60 s against a mean of 278 expert-marked
+    # fast ripples per subject. One threshold for both bands is not a
+    # simplification, it is a bug.
+    #
+    # That "278" was "~70" here until the Detectors page started reading
+    # ``data/benchmark/`` instead of restating it: 70.6 is this detector's own
+    # mean detection count at 5.0 SD, not the expert count, and the same
+    # sentence in EVALUATION.md said 228. Three copies, two of them wrong;
+    # ``data/benchmark/cohort.csv`` now carries the per-subject counts so the
+    # number has a file behind it. See ``tests/test_app.py``.
     "interictal-agreement-fast-ripple": 5.0,
 }
 

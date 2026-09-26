@@ -17,7 +17,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import streamlit as st  # noqa: E402
 
-from app.panels import EXAMPLE, STUDIES, analyses  # noqa: E402,F401
+from app.panels import (  # noqa: E402,F401
+    DATA_SENTENCE,
+    DISCLAIMER_LEAD,
+    DISCLAIMER_TAIL,
+    EXAMPLE,
+    STUDIES,
+    analyses,
+)
 from onset_hfo.store import ResultStore  # noqa: E402
 
 
@@ -37,10 +44,7 @@ def banner() -> None:
     st.markdown(
         "<div style='background:#FDF6E6;color:#8A5A00;border:1px solid #EFDCAE;"
         "padding:8px 14px;border-radius:8px;font-size:13px'>"
-        "<b>Research prototype — not a medical device.</b> Real public recordings, "
-        "real expert markings, real surgical outcomes — and nothing here is validated "
-        "for clinical use. Every number cites the window it came from. "
-        "There is no recommendation anywhere in this product; the clinician decides."
+        f"<b>{DISCLAIMER_LEAD}</b> {DATA_SENTENCE} {DISCLAIMER_TAIL}"
         "</div>", unsafe_allow_html=True)
 
 

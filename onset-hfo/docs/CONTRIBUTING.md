@@ -35,7 +35,7 @@
 cd onset-hfo
 python -m venv .venv && . .venv/bin/activate
 pip install -e ".[dev]"
-pytest -q          # 360 tests, offline and enforced
+pytest -q          # 379 tests, offline and enforced
 # sklearn and openpyxl come with [dev]; ".[ml]" is the same set without pytest
 ruff check .
 ```
@@ -170,6 +170,31 @@ jupyter nbconvert --to notebook --execute --inplace notebooks/*.ipynb
 * Prefer a boring, readable implementation to a clever one: this codebase's
   main job is to be argued with.
 
+## Four things that must stay in step with `berdakh/onset`
+
+There are two repositories under one project name: this one, and the
+[teaching prototype](https://github.com/berdakh/onset) on a synthetic cohort.
+[`DUPLICATION.md`](DUPLICATION.md) measures what is actually shared and says
+what must **not** be merged. Four things must match across them. **Anything not
+on this list is allowed to differ.**
+
+1. The **standing disclaimer**'s structure and its no-recommendation sentence.
+   The canonical copy is `app/common.py`'s `DISCLAIMER_LEAD` /
+   `DATA_SENTENCE` / `DISCLAIMER_TAIL`; only `DATA_SENTENCE` differs between
+   the two apps, because only one of them runs on real recordings.
+2. The **shared page names**: `Home`, `Report`, `Assistant`, `Data`,
+   `Architecture`, `Research`.
+3. The **sidebar link row** — same destinations, same names, same order:
+   Clinical guide · Implementation walkthrough · Results & docs · Onset
+   project. The entries after those four differ by design.
+4. `.streamlit/config.toml`, which carries a `TWIN FILE` header saying so.
+
+No mechanism can enforce this across two repositories, and a submodule or a
+published package would cost more than four items are worth. The honest
+control is that the list is short, written down in both places, and each item
+carries a comment naming its twin. **If you change one of the four, change it
+in the other repository in the same sitting.**
+
 ## Review checklist
 
 - [ ] `pytest -q` and `ruff check .` pass
@@ -185,3 +210,5 @@ jupyter nbconvert --to notebook --execute --inplace notebooks/*.ipynb
 - [ ] nothing reaches the network from a test (`ONSET_HFO_OFFLINE` is set for
       the whole suite; a new download will fail loudly)
 - [ ] `docs/LIMITATIONS.md` updated if the change alters what the results mean
+- [ ] if one of the four items above changed: the twin in `berdakh/onset`
+      changed too

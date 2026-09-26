@@ -1,5 +1,11 @@
-# Matches the Onset prototype's theme so the two deployed apps look like one
-# project. Streamlit Community Cloud reads this from the repository root.
+# TWIN FILE. This is byte-identical, apart from this header, to
+# berdakh/onset's .streamlit/config.toml, and it is meant to stay that way:
+# the two deployed apps are one project and must not drift into two palettes.
+# Nothing enforces it -- there is no shared package and deliberately won't be
+# (see onset-hfo/docs/DUPLICATION.md) -- so if you change a colour here,
+# change it there in the same sitting.
+#
+# Streamlit Community Cloud reads this from the repository root.
 [theme]
 base = "light"
 primaryColor = "#534AB7"

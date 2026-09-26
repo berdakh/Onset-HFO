@@ -33,7 +33,11 @@ notebook = ["jupyter>=1.0", "ipywidgets>=8.1"]
 # The reading interface (app/). Kept out of the core install because the
 # pipeline, the agent and every study run without it -- the page is a way of
 # reading results, not a way of producing them.
-app = ["streamlit>=1.30"]
+# 1.64 is what the root requirements.txt installs on Streamlit Cloud and
+# what every page was verified against. The floor used to say 1.30,
+# which had not been true since the pages started using width="stretch"
+# and chart axis labels.
+app = ["streamlit>=1.64"]
 
 # The learned per-contact model, its calibration and its conformal sets.
 # Everything else in the package runs without these.
