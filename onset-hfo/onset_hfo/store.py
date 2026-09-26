@@ -227,7 +227,7 @@ class ResultStore:
         return out
 
     def detector_agreement(self) -> dict:
-        """Event-by-event agreement between the two HFO detectors."""
+        """Event-by-event agreement between the HFO detectors that were run."""
         return {k: _clean(v) for k, v in self.agreement.items()}
 
     def rate_change_table(self) -> list[dict]:

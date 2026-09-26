@@ -58,10 +58,19 @@ which is in the roadmap.
 
 ## 2. HFO detection
 
-`onset_hfo/detectors/engine.py` runs both HFO detectors; `rms.py` and
-`line_length.py` differ *only* in one function. That is deliberate: it means
-any disagreement between them is attributable to the feature, not to two
-independent implementations drifting apart.
+`onset_hfo/detectors/engine.py` runs every HFO detector; `rms.py`,
+`line_length.py`, `hilbert.py` and `short_time_energy.py` differ *only* in one
+function. That is deliberate: it means any disagreement between them is
+attributable to the feature, not to independent implementations drifting
+apart.
+
+**Two of the four are opt-in.** `run_pipeline` defaults to RMS and line
+length; pass `detectors=(...)` for the others. They were added to answer
+whether the disagreement between the first pair is structural — it is, and
+every pair of the four agrees on between 47% and 79% of events; see
+[`EVALUATION.md`](EVALUATION.md) §1b. Their thresholds are inherited from the
+energy detector rather than swept, which the same section shows is not a safe
+thing to do.
 
 ### The five steps
 
@@ -69,7 +78,17 @@ independent implementations drifting apart.
 2. **Feature** in a sliding window of `rms_window_ms = 3 ms`:
 
    * RMS energy — `sqrt(mean(x²))` over the window (Staba et al., 2002);
-   * line length — `mean(|x[n] − x[n−1]|)` over the window (Gardner et al., 2007).
+   * line length — `mean(|x[n] − x[n−1]|)` over the window (Gardner et al., 2007);
+   * Hilbert envelope — `|x + i·H{x}|`, smoothed over the same window. The
+     feature family the MNI detector belongs to, but **not** that detector:
+     Zelmann et al.'s contribution is automatic baseline selection on a
+     wavelet-entropy criterion, absent here, and calling this "the MNI
+     detector" would invite comparison against a threshold rule this code does
+     not use;
+   * short-time energy — `sum(x²)` over the window. Monotone-related to RMS
+     and therefore identical to it under a *fixed* threshold — but not under
+     this pipeline's `median + k·robustSD` rule, which is what
+     [`EVALUATION.md`](EVALUATION.md) §1b measures.
 
 3. **Threshold** at `median(feature) + threshold_sd × robustSD(feature)`,
    computed per channel. Default `threshold_sd = 5` for RMS (Staba's value),

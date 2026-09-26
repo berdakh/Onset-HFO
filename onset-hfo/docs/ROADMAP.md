@@ -1,30 +1,59 @@
 # Roadmap
 
-What to build next, in order, with the reason each item matters. Items near
-the top change what the results *mean*; items lower down make the system nicer
-to use.
+**Start with [What is left, in order](#what-is-left-in-order).** That table is
+the current answer and it is kept current; everything after it is history,
+numbered in the order the items were *raised* rather than the order they should
+now be done.
 
 Each item names the files it touches and roughly what is involved, so someone
-joining can pick one up without a handover meeting.
+joining can pick one up without a handover meeting — and the finished ones are
+kept rather than deleted, because what an item found (and what it cost) is the
+most useful thing to read before starting the next one.
 
-> **Updated after the outcome study.** Item 1 (interictal recordings) is
-> **done** — every headline number now comes from `ds003498`. Item 2 is done
-> twice over, and what it produced is a **new item 10** which is now the top of
-> the list: the outcome study's conclusion changed when the analysis window
-> grew from 60 s to the whole 300 s run, so *ranking stability* displaced
-> *detector quality* as the thing to fix. Item 7 (whole recordings) is done for
-> the outcome study and not for the pipeline generally.
->
-> **From the earlier round.** Three entries
-> changed status. Item 2 (outcome as reference standard) is **done**: the
-> archive publishes curated SOZ contacts, `onset_hfo/cohort.py` reads them,
-> and the 22-subject cohort table is committed. Item 3 (electrode geometry) is
-> **not possible on this dataset** — there is no `electrodes.tsv` for any
-> subject. Item 8 (the agent) is largely built, including the falsification
-> suite; what remains of it is a real language model driving the ladder, which
-> nothing else can substitute for. See
-> [`ORCHESTRATION.md`](ORCHESTRATION.md) §8 and
-> [`LOCALIZATION.md`](LOCALIZATION.md) §6 for the current boundary.
+## What is left, in order
+
+Ten numbered items below carry the history — why each mattered, what it found,
+and what it cost. This section is the short answer: **what is still open, and
+which of it is blocked on what.**
+
+| | Open work | State | Blocked on |
+|---|---|---|---|
+| **1** | [**Run the agent ladder under a real model**](#8-the-agent-more-tools-and-a-measured-evaluation-of-it) | harness done, **numbers missing** | a GPU afternoon |
+| **2** | [**A second cohort**](#11-a-second-cohort) | not started | finding an archive |
+| **3** | [The ladder across the 22-subject cohort](#2-outcome-as-the-reference-standard--done-twice-the-ladder-across-the-cohort-is-not) | cheap; recordings cached | deliberately gated on #1 |
+| **4** | [Sweep the two new detectors on real data](#4-more-than-two-detectors-and-a-proper-agreement-analysis--built-measured-only-on-synthetic-data) | built; synthetic only | a `benchmark` run with network |
+| **5** | [A hand-annotated benchmark](#5-a-small-hand-annotated-benchmark) | not started | two reviewers' time |
+| **6** | [Physiological versus epileptic ripples](#6-physiological-versus-epileptic-ripples) | not started | nothing, and it is hard |
+| **7** | [Whole recordings in `run` and `benchmark`](#7-scaling-whole-recordings-instead-of-one-minute-slices--done-for-the-outcome-study) | done for `outcome` only | nothing |
+| **8** | [A cohort screen in the interface](#9-interface--done) | not started | nothing |
+| **9** | [Electrode geometry](#3-electrode-geometry--blocked-on-this-dataset-needs-a-different-archive) | write it against the schema | an archive with coordinates |
+
+**Why #1 is first.** Every orchestration number this project has published
+comes from the deterministic scripted planner, which the docs have called
+"the control, not the result" throughout. `onset_agent/benchmark.py` and
+`notebooks/06_agent_benchmark.ipynb` now sweep model × quantization × rung,
+checkpoint each cell, and record the accelerator and library versions
+automatically. The machinery is tested offline; what is missing is a GPU and
+an afternoon. A free Colab T4 covers seven of the nine cells.
+
+**Why #2 is second.** Everything measured here comes from one centre, one
+annotation protocol and one surgical team. The reproducibility result — that a
+whole recording is a stable unit and a minute of one is not — is the finding
+most worth testing elsewhere, and the one most likely to hold.
+
+**#3 is gated on purpose.** Running the ladder over 22 patients before a real
+model has driven it would produce 22 patients' worth of *scripted-planner*
+numbers, which measure the script rather than the thesis.
+
+Not on this list, because they live in their own documents with their own
+ordered plans: the two-repository cleanup
+([`DUPLICATION.md`](DUPLICATION.md), items 4–8) and the expo material
+([`EXPO.md`](EXPO.md), [`POSTER.md`](POSTER.md) — the claim is written, the
+board is not built).
+
+---
+
+## History
 
 ---
 
@@ -154,18 +183,47 @@ that ships coordinates.
 
 ---
 
-## 4. More than two detectors, and a proper agreement analysis
+## 4. More than two detectors, and a proper agreement analysis — *built; measured only on synthetic data*
 
 **Why.** Two detectors matching about half their events is a finding worth
 taking seriously. Three or four would show whether the disagreement is
 idiosyncratic or structural.
 
-**What.** Add the Hilbert-envelope (MNI) and short-time-energy detectors —
-both fit `detect_with_feature` almost unchanged. Then report agreement as a
-matrix, and rank channels by the *number of detectors* that place them in the
-top group, which is more robust than any single rate.
+**Built.** `detect_hilbert` (the smoothed analytic-signal envelope) and
+`detect_short_time_energy` (the sum of squares), both through the same
+`detect_with_feature` engine, so the four differ only in the feature they
+threshold. `metrics.agreement_matrix` reports every pair, and
+`metrics.consensus_ranking` ranks channels by the *number of detectors* that
+place them in their own top group rather than by an average of four rates on
+four different scales. Both are **opt-in**: `run_pipeline` still defaults to
+two, because turning them on would change every published number without
+anyone deciding to.
 
-**Touches.** `onset_hfo/detectors/`, `metrics.py`, `report.py`.
+**What it found, on the simulator** ([`EVALUATION.md`](EVALUATION.md) §1b):
+
+* **The disagreement is structural.** Every pair of the four agrees on between
+  47% and 79% of events. No two of these detectors agree on more than four
+  events in five.
+* **A prediction written into the code was wrong**, which is why it was
+  written down first. `short_time_energy` was expected to be nearly redundant
+  with `rms` — they are monotone-related, so a *fixed* threshold would select
+  identical samples. It is the **least** similar pair (0.471), and the closest
+  pair is RMS with the envelope (0.788).
+* **The cause generalises, and is the actual result.** `median + 5 robustSD`
+  sits near the 98th percentile of an RMS trace and the 96th of an energy
+  trace, because squaring is not affine. **A threshold in robust SDs is not a
+  portable operating point between features.** §3 said the threshold is a
+  choice rather than a fact; this says the choice does not transfer.
+
+**What remains.** All of it is synthetic. The real-data agreement matrix on
+ds003498 against the expert markings needs one `onset-hfo benchmark` run with
+network access, and each of the two new features needs its own threshold
+sweep — inheriting 5.0 SD is exactly the mistake §0 caught the first time.
+Until then these are machinery with a sanity check, not a result.
+
+**Touches.** `onset_hfo/detectors/` (done), `metrics.py` (done),
+`config.py` (done), `report.py` — the report still shows one pairwise
+agreement rather than the matrix.
 
 ---
 
@@ -373,11 +431,49 @@ it now holds. What twenty patients cannot settle is whether the quantity
 predicts outcome.
 
 **What is left is no longer item 10.** Every question it posed has an answer.
-The next one is a second cohort: nothing here has been shown to hold outside
-Zurich.
+The next one is item 11.
 
 **Touches.** `onset_hfo/outcome.py`, `onset_hfo/metrics.py`,
 `onset_hfo/stability.py`, `docs/OUTCOME.md`.
+
+---
+
+## 11. A second cohort
+
+**Why.** Every measured number in this project comes from twenty patients at
+one centre, marked under one annotation protocol, operated on by one surgical
+team. That is the single largest threat to everything above it, and no amount
+of further analysis of the same twenty patients addresses it.
+
+**What to test first, and it is not the outcome result.** The outcome arm is
+underpowered by construction — 13 against 7 detects only AUC ≥ 0.85 at 80%
+power — so a second cohort of similar size would not settle it either. The
+finding worth porting is the **reproducibility** one, because it is a
+within-cohort comparison and does not depend on that power: does the
+per-patient answer hold across whole recordings and move across minutes on
+*other* patients, from other electrodes, in another hospital? If it does, "a
+whole recording is a stable unit of measurement" becomes a statement about HFO
+analysis rather than about Zurich.
+
+**What it needs.** An archive with interictal recordings at ≥ 2000 Hz, several
+runs per subject, and ideally resection or outcome information. The loader
+contract is one dataclass (`Recording`), so a new archive is a loader and a
+`DatasetSpec`, not a rewrite. Candidates worth checking before building
+anything: other OpenNeuro iEEG datasets, SWEC-ETHZ, and institutional data
+under your own approvals. Check that signal files actually exist before
+planning around a dataset — this project lost time to `ds003029`'s 25
+`task-interictal` entries, 24 of which are metadata with no `.eeg`.
+
+**What would make it a stronger paper rather than a longer one.** Pre-register
+the window analysis before touching the second cohort's outcome labels. The
+first version of this study moved its own headline when the window grew, and
+the credibility of the correction rests on the metric and band having been
+fixed in advance. Doing that deliberately the second time is cheap and is the
+difference between a replication and another exploratory run.
+
+**Touches.** `onset_hfo/datasets.py` (a loader and a `DatasetSpec`),
+`onset_hfo/stability.py` and `outcome.py` (unchanged if the loader is right),
+`docs/DATA.md`.
 
 ---
 

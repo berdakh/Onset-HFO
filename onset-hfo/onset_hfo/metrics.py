@@ -27,6 +27,8 @@ __all__ = [
     "rank_channels",
     "match_events",
     "detector_agreement",
+    "agreement_matrix",
+    "consensus_ranking",
     "compare_rankings",
     "rate_timecourse",
     "rate_change",
@@ -213,6 +215,87 @@ def detector_agreement(a: list[Event], b: list[Event], name_a: str = "a", name_b
         "jaccard": (len(pairs) / union) if union else float("nan"),
         "tolerance_s": tolerance,
     }
+
+
+def agreement_matrix(events_by_detector: dict[str, list[Event]],
+                     tolerance: float = 0.02) -> pd.DataFrame:
+    """Pairwise Jaccard agreement between every pair of detectors.
+
+    Two detectors matching about half their events is a finding; three or four
+    show whether that disagreement is *structural* or an idiosyncrasy of one
+    pair. The diagonal is 1.0 by construction and is filled in so the table
+    reads as a matrix rather than as a triangle with holes.
+
+    The matrix is also the only place the redundancy question gets answered.
+    ``short_time_energy`` is ``rms`` under a monotone transform, so a high cell
+    between those two is the expected result and a *low* one would be the
+    surprise worth chasing. An ensemble of four detectors, two of which agree
+    with each other on nearly every event, holds three opinions.
+
+    Returns a square frame indexed and columned by detector name. Off-diagonal
+    cells are ``nan`` only when neither detector accepted a single event, since
+    a Jaccard index over two empty sets is undefined rather than perfect.
+    """
+    names = list(events_by_detector)
+    matrix = pd.DataFrame(np.nan, index=names, columns=names, dtype=float)
+    for i, a in enumerate(names):
+        matrix.loc[a, a] = 1.0
+        for b in names[i + 1:]:
+            jaccard = detector_agreement(events_by_detector[a], events_by_detector[b],
+                                         a, b, tolerance)["jaccard"]
+            matrix.loc[a, b] = matrix.loc[b, a] = jaccard
+    return matrix
+
+
+def consensus_ranking(events_by_detector: dict[str, list[Event]], duration_s: float,
+                      channels: list[str] | None = None, top_k: int = 5) -> pd.DataFrame:
+    """Rank channels by how many *detectors* place them in their own top group.
+
+    The motivation is that a rate is a fragile statistic -- it is an argmax
+    over channels whose Poisson intervals overlap (see
+    :func:`leader_separation`) -- while "three of four detectors put this
+    channel in their top five" is a vote, and a vote over independent-ish
+    features degrades more gracefully than an average of four rates would.
+
+    Averaging the rates instead would be worse for two reasons. The features
+    are on different scales -- short-time energy is in microvolts squared
+    times samples -- so an average would be dominated by whichever detector
+    has the largest units. And a detector that is nearly a copy of another
+    would get counted twice in the mean; here it still gets one vote, which is
+    the right amount of influence for a fourth opinion that is really a second
+    copy of the first. Read this column next to
+    :func:`agreement_matrix`: a unanimous vote among detectors that agree with
+    each other on every event is not unanimity, it is one detector.
+
+    ``n_detectors`` is the vote. ``mean_rank`` breaks ties, and the per-
+    detector rate columns are kept so a reader can see what the vote was built
+    from rather than taking it on trust.
+    """
+    if not events_by_detector:
+        return pd.DataFrame(columns=["channel", "n_detectors", "mean_rank"])
+
+    per_detector = {name: rank_channels(channel_rates(events, duration_s, channels))
+                    for name, events in events_by_detector.items()}
+
+    frame: pd.DataFrame | None = None
+    for name, ranked in per_detector.items():
+        part = ranked[["channel", "rank", "rate_per_min"]].rename(
+            columns={"rank": f"rank_{name}", "rate_per_min": f"rate_{name}"})
+        frame = part if frame is None else frame.merge(part, on="channel", how="outer")
+
+    rank_cols = [c for c in frame.columns if c.startswith("rank_")]
+    n_channels = len(frame)
+    for col in rank_cols:
+        # A channel a detector never saw sits below everything it did see.
+        frame[col] = frame[col].fillna(n_channels + 1).astype(int)
+    for col in [c for c in frame.columns if c.startswith("rate_")]:
+        frame[col] = frame[col].fillna(0.0)
+
+    frame["n_detectors"] = (frame[rank_cols] <= top_k).sum(axis=1)
+    frame["mean_rank"] = frame[rank_cols].mean(axis=1)
+    frame["top_k"] = top_k
+    ordered = frame.sort_values(["n_detectors", "mean_rank"], ascending=[False, True])
+    return ordered.reset_index(drop=True)
 
 
 def compare_rankings(rates_a: pd.DataFrame, rates_b: pd.DataFrame,

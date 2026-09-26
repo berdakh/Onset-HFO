@@ -63,8 +63,9 @@ Read in this order:
 
 ## "I am joining the project and need to do something useful"
 
-* [**ROADMAP.md**](ROADMAP.md) — the next pieces of work, in order, each with
-  the reason it matters and roughly what it involves.
+* [**ROADMAP.md**](ROADMAP.md) — what is still open, in priority order, with
+  what each item is blocked on; then the history of the finished ones, kept
+  because what an item found is worth reading before starting the next.
 * [**`onset_agent/benchmark.py`**](../onset_agent/benchmark.py) — the harness
   for the one measurement this project most conspicuously lacks: what a *real*
   open-weight model does on the S0–S3 ladder, swept over quantizations.

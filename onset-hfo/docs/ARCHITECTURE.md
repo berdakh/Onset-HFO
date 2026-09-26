@@ -57,7 +57,7 @@ agent would have nothing to say. That is the intended relationship.
 | Load | `datasets.py` / `synthetic.py` | archive or seed | `Recording` | carries provenance, seizure markers, `t_offset` |
 | Preprocess | `preprocess.py` | `Recording` | `Prepared` | µV, bipolar, filtered; logs every step |
 | Band-pass | `detectors/base.py` | `Prepared` | array | computed **once** and shared by both HFO detectors |
-| Detect | `detectors/engine.py` + `rms.py`/`line_length.py`/`spike.py` | `Prepared` | `list[Event]` | the two HFO detectors differ only in one function |
+| Detect | `detectors/engine.py` + `rms.py`/`line_length.py`/`hilbert.py`/`short_time_energy.py`/`spike.py` | `Prepared` | `list[Event]` | the four HFO detectors differ only in one function; two run by default |
 | Validate | `validate.py` | `list[Event]` | same list, marked | rejected events are kept with a reason |
 | Measure | `metrics.py` | events | rates, ranks, agreement | Poisson intervals on every rate |
 | Report | `report.py` | all of the above | `Report` | evidence-carrying, no recommendation field |

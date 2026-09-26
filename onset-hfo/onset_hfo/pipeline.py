@@ -25,7 +25,13 @@ import pandas as pd
 
 from onset_hfo.config import PIPELINE_VERSION, RESULTS_DIR, PipelineConfig
 from onset_hfo.datasets import Recording
-from onset_hfo.detectors import detect_line_length, detect_rms, detect_spikes
+from onset_hfo.detectors import (
+    detect_hilbert,
+    detect_line_length,
+    detect_rms,
+    detect_short_time_energy,
+    detect_spikes,
+)
 from onset_hfo.detectors.base import Event, bandpass, events_to_frame
 from onset_hfo.metrics import channel_rates, compare_rankings, detector_agreement, rate_change
 from onset_hfo.preprocess import Prepared, prepare
@@ -34,7 +40,13 @@ from onset_hfo.validate import flag_spike_cooccurrence, rejection_summary, valid
 
 __all__ = ["PipelineResult", "run_pipeline"]
 
-HFO_DETECTORS = {"rms": detect_rms, "line_length": detect_line_length}
+#: Every HFO detector that can be asked for by name. The *default* is still
+#: two -- see ``run_pipeline(detectors=...)`` -- because the two added later
+#: carry inherited thresholds, and turning them on by default would change
+#: every published number without anyone deciding to.
+HFO_DETECTORS = {"rms": detect_rms, "line_length": detect_line_length,
+                 "hilbert": detect_hilbert,
+                 "short_time_energy": detect_short_time_energy}
 
 
 @dataclass
