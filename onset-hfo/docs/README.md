@@ -13,6 +13,10 @@ justifies claiming. It is self-contained — one file, no build step.
 
 ## "I just want to click around in it"
 
+**[https://onsetnu.streamlit.app/](https://onsetnu.streamlit.app/)** — deployed, no install, no account.
+
+Or locally:
+
 ```bash
 pip install -e ".[app]"
 streamlit run app/Home.py

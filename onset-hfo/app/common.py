@@ -25,6 +25,7 @@ def banner() -> None:
     """The line that has to be on every page, and the tutorial link."""
     st.sidebar.markdown(
         "[Tutorial](https://berdakh.github.io/onset/tutorial.html) · "
+        "[Results & docs](https://berdakh.github.io/onset-hfo/) · "
         "[Onset project](https://berdakh.github.io/onset/) · "
         "[Code](https://github.com/berdakh/onset-hfo)")
     st.markdown(

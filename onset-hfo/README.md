@@ -27,6 +27,11 @@ the schema**.
 
 ## Start here
 
+**[Open the live app](https://onsetnu.streamlit.app/)** — nine pages over real recordings, no install.
+A channel's rate leads to the events behind it, an event leads to the signal it
+was measured on, and the assistant's every citation opens to both. Ask it which
+channels to resect and watch it refuse.
+
 New to the project? [**docs/TUTORIAL.html**](docs/TUTORIAL.html) is a standalone
 walkthrough — the research question, the signal, the traps, every measured
 result and what it does and does not support. One file, opens in a browser.
@@ -88,9 +93,10 @@ python -m onset_hfo.cli benchmark
 python -m onset_hfo.cli outcome
 
 # 10. read a saved analysis on a page, with the signal behind every number
+#     (or just open https://onsetnu.streamlit.app/)
 pip install -e ".[app]" && streamlit run app/Home.py
 
-pytest -q        # 236 tests, all offline
+pytest -q        # 285 tests, all offline
 ```
 
 ## What it actually does
@@ -266,7 +272,8 @@ chance — see [`docs/EVALUATION.md`](docs/EVALUATION.md).
 | [`docs/LIMITATIONS.md`](docs/LIMITATIONS.md) | what this must not be used for |
 | [`docs/GLOSSARY.md`](docs/GLOSSARY.md) | the clinical and signal-processing vocabulary, defined |
 | [`docs/ROADMAP.md`](docs/ROADMAP.md) | what to build next, in order, with the reasoning |
-| [`app/README.md`](app/README.md) | the reading interface: what it shows, and the one rule it is built on |
+| [**the live app**](https://onsetnu.streamlit.app/) | the interface itself, deployed — nine pages over real recordings |
+| [`app/README.md`](app/README.md) | the reading interface: what it shows, the one rule it is built on, and how to deploy it |
 | [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md) | how to add a detector, a dataset or a tool without breaking the contracts |
 
 ## Layout
