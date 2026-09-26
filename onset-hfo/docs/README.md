@@ -65,6 +65,13 @@ Read in this order:
 
 * [**ROADMAP.md**](ROADMAP.md) — the next pieces of work, in order, each with
   the reason it matters and roughly what it involves.
+* [**`onset_agent/benchmark.py`**](../onset_agent/benchmark.py) — the harness
+  for the one measurement this project most conspicuously lacks: what a *real*
+  open-weight model does on the S0–S3 ladder, swept over quantizations.
+  `notebooks/06_agent_benchmark.ipynb` runs it on a Colab GPU and resumes
+  after a disconnect; `python -m onset_agent.benchmark --backend scripted
+  --synthetic` runs the whole thing offline in seconds. The harness is done;
+  **the numbers are not**.
 * [**CONTRIBUTING.md**](CONTRIBUTING.md) — how to add a detector, a dataset or
   an agent tool without breaking the contracts the rest of the code relies on.
 * [**GLOSSARY.md**](GLOSSARY.md) — if "bipolar montage", "ictal" or "ripple

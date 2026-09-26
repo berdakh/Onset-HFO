@@ -391,9 +391,23 @@ Not yet, and each is a self-contained next piece of work:
   needs a language model is the anonymised-names one: it is specifically
   designed to catch a model reciting priors about electrode naming, and a
   scripted planner cannot fail it.
-* **The model and quantization ladder.** Qwen3-4B/8B/14B at FP16/8-bit/4-bit,
-  scored on planning quality, tool-call validity, unsupported-claim rate and
-  wall-clock. Needs a GPU; the backends already exist.
+* **The model and quantization ladder.** The *harness* is now built:
+  [`onset_agent/benchmark.py`](../onset_agent/benchmark.py) sweeps
+  model x quantization x rung, scores each cell on tool-call validity,
+  unsupported-claim rate and distance from the S0 reference, checkpoints every
+  cell so a disconnecting notebook runtime does not cost the sweep, and
+  records the accelerator, CUDA version, library versions and git commit per
+  cell. `notebooks/06_agent_benchmark.ipynb` runs it on a Colab GPU;
+  `python -m onset_agent.benchmark --backend scripted --synthetic` runs the
+  whole thing offline in a few seconds, which is what the 29 tests in
+  `tests/test_benchmark.py` do. **What is missing is the run**: the numbers,
+  from an actual GPU.
+
+  One caveat is built into the harness rather than left to the reader.
+  Wall-clock is recorded but `timing_warnings()` refuses to let it be compared
+  across a sweep that spanned two accelerators, two sessions, or 8-bit cells
+  on a pre-Ampere card where the `bitsandbytes` int8 path is slower than fp16
+  --- there, a quantization timing comparison measures the kernel.
 * **A real-model measurement of the ladder.** Every number quoted here comes
   from the deterministic scripted planner. That is the control, not the
   result. `scripts/run_model_ladder.py` produces the missing numbers on a

@@ -236,23 +236,33 @@ append-only evidence store, the S0–S3 ablation ladder, three stopping rules,
 and two verifiers with a measured delta between them. See
 [`ORCHESTRATION.md`](ORCHESTRATION.md).
 
+**Also built since:**
+
+* ~~**Falsification tests.**~~ **Done.** `onset_agent/falsify.py` runs five:
+  anonymised channel names, a shuffled name-to-signal mapping, the leading
+  channel removed, a recording with no pathology, and run-to-run stability.
+  The fourth one *failed* and produced `metrics.leader_separation` — see
+  [`ORCHESTRATION.md`](ORCHESTRATION.md) §6b.
+* ~~**The harness for the model and quantization ladder.**~~ **Done.**
+  `onset_agent/benchmark.py` sweeps model × quantization × rung, checkpoints
+  each cell so a disconnecting runtime resumes, records the accelerator and
+  every library version per cell, and refuses to let wall-clock be compared
+  across sessions. `notebooks/06_agent_benchmark.ipynb` is the Colab path;
+  29 offline tests cover it.
+
 **What remains, in order:**
 
-* **Falsification tests.** Shuffled channel labels; the leading channel
-  removed; a recording with no epileptiform activity. If the agent still
-  produces a confident ranking, that is the result a reviewer will look
-  hardest for — better found in week three than in month six. Three functions
-  over `AnalysisSession`.
-* **A real-model measurement.** Every ladder number published so far comes
-  from the deterministic scripted planner. That is the control, not the
-  result.
-* **The model and quantization ladder.** Qwen3-4B/8B/14B at FP16/8-bit/4-bit,
-  scored on planning quality, tool-call validity, unsupported-claim rate,
-  tokens and wall-clock. Needs a GPU; the backends already exist.
+* **The run itself.** Every ladder number published so far comes from the
+  deterministic scripted planner. That is the control, not the result. The
+  harness is written and tested; what is missing is a GPU and an afternoon.
+  A free Colab T4 covers seven of the nine model × quantization cells — only
+  8B and 14B at fp16 need a larger card.
 * **A tool the rest of the system does not have**: rejected events with their
   reasons, and comparison across two recordings of the same patient.
 
-**Touches.** new `onset_agent/falsify.py`, new `onset_agent/benchmark.py`.
+**Touches.** `onset_agent/falsify.py` (done), `onset_agent/benchmark.py`
+(done), `scripts/run_model_ladder.py` (done) — the depth run to this module's
+breadth sweep.
 
 ---
 
@@ -378,8 +388,13 @@ Zurich.
   at 1. That is a design choice, not a law, and it is the mechanism by which
   the re-planning rungs can differ from the fixed ones at all. On `sub-pt01`
   the leading channels are so tied that a 5% penalty reshuffles them, which
-  means the rule is currently doing more than the evidence supports. Should
-  the ranking refuse to order channels whose intervals overlap?
+  means the rule is currently doing more than the evidence supports.
+  ~~Should the ranking refuse to order channels whose intervals overlap?~~
+  **Answered, and the answer was yes**: `metrics.candidate_channels` and
+  `leader_separation` report the set of channels that cannot be told apart
+  from the leader, and [`OUTCOME.md`](OUTCOME.md) measures what reporting the
+  set instead of a winner costs (0.017 AUC). The robustness multiplier itself
+  is still a design choice and still unmeasured.
 * **Threshold choice.** On the simulator, 3–4 robust SDs beats the published 5
   on F1. Is that a property of the simulator's SNR distribution, or a real
   improvement? Answering it needs item 5.

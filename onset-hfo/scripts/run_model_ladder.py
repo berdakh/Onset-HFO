@@ -46,6 +46,16 @@ Output
 `RESULTS.md`, a table ready to paste into `docs/ORCHESTRATION.md`. The
 scripted-planner column is re-run here rather than quoted, so both columns
 come from the same machine and the same recording.
+
+Not this script's job
+---------------------
+The **model x quantization matrix** -- fp16/8-bit/4-bit across several model
+sizes -- belongs to `onset_agent.benchmark`, which checkpoints every cell so a
+notebook runtime that disconnects does not cost the whole sweep, and records
+the accelerator and library versions per cell rather than asking you to note
+them. This script is the depth run: one model, one machine, every measurement
+including the falsification suite. Keep it that way; two implementations of
+the same measurement drift apart.
 """
 
 from __future__ import annotations
