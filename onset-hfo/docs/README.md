@@ -70,6 +70,19 @@ Read in this order:
 * [**GLOSSARY.md**](GLOSSARY.md) — if "bipolar montage", "ictal" or "ripple
   band" are not yet second nature.
 
+## "I am presenting this to people"
+
+* [**EXPO.md**](EXPO.md) — the medical-expo brief: the 90-second pitch, a
+  rehearsed five-minute demo path through the live app, the questions a
+  clinician will ask with honest answers, and the claims never to make.
+* [**POSTER.md**](POSTER.md) — the one claim a poster is allowed to make, the
+  evidence behind each clause of it, the non-claims, an abstract, and the
+  panel plan.
+* [**DUPLICATION.md**](DUPLICATION.md) — why there are two repositories, what
+  is actually duplicated between them, what must not be merged, and the plan.
+* The printable one-page handout is [`site/handout.html`](../../site/handout.html),
+  live at <https://berdakh.github.io/onset-hfo/handout.html>.
+
 ## "Where is X?"
 
 | Question | File |
