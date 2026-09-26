@@ -82,6 +82,15 @@ h1 {
   font-family: var(--serif); font-weight: 600; font-size: clamp(38px, 7vw, 62px);
   line-height: 1.06; letter-spacing: -.02em; margin: 0 0 20px; text-wrap: balance;
 }
+.sibling {
+  font-family: var(--sans);
+  font-size: 15px;
+  line-height: 1.6;
+  color: var(--ink-2);
+  border-left: 3px solid var(--rule-2);
+  padding-left: 16px;
+  margin: 22px 0 0;
+}
 .standfirst {
   font-family: var(--serif); font-size: clamp(18px, 2.4vw, 21px); line-height: 1.5;
   color: var(--ink-2); margin: 0 0 28px; max-width: 640px;
@@ -218,9 +227,19 @@ pre b { color: var(--ink); font-weight: 500; }
   <p class="kicker">Onset-HFO · Brain–Machine Interface Lab, Nazarbayev University</p>
   <h1>Where do seizures start?</h1>
   <p class="standfirst">A surgeon can cure drug-resistant epilepsy by removing the tissue that generates the seizures — but only if someone can point at it. This is a tutorial on trying to point at it with a machine, on public intracranial EEG, and on how much of the answer survives contact with a new patient.</p>
+  <p class="sibling">There is a companion to this document. It asks the
+    opposite question: where this one works through <em>whether the results are
+    true</em> — what the archive does and does not contain, why a filtered sharp
+    edge looks like a ripple, and five attacks on the result with the one that
+    landed — the
+    <a href="https://berdakh.github.io/onset/tutorial.html">implementation
+    walkthrough</a> on the Onset project site works through <em>how the system
+    is built</em>: iEEG, features, models, evaluation without leakage, and an
+    optional agent lab. Same subject, opposite questions; neither is a longer
+    version of the other.</p>
   <div class="meta">
     <span><b>Data</b> OpenNeuro ds003029 · 22 patients · 1,466 channels</span>
-    <span><b>Code</b> 190 offline tests</span>
+    <span><b>Code</b> 378 offline tests</span>
     <span><b>Claim</b> none clinical</span>
   </div>
 </header>

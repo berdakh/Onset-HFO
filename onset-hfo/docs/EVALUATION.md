@@ -73,7 +73,7 @@ Analysable at last: these recordings are 2000 Hz, the ictal one was 1000.
 half.** Ripples rank best at 2.0 SD, fast ripples at 5.0 SD — an interior
 maximum of a 2–10 sweep, not a boundary. Running the ripple value in the
 fast-ripple band costs precision 0.543 → 0.086: a mean of 1,142 detections
-per 60 s against a mean of 228 expert-marked fast ripples. A single
+per 60 s against a mean of 278 expert-marked fast ripples. A single
 threshold for both bands is not a simplification, it is a bug, and
 [OUTCOME.md](OUTCOME.md) shows what it costs downstream. `config.THRESHOLDS`
 now carries `interictal-agreement-fast-ripple` alongside the ripple values,
@@ -473,7 +473,7 @@ unmeasured, and is the first experiment to run.
 
 ## 7. Test suite
 
-`pytest -q` — 360 tests, entirely offline. They cover the
+`pytest -q` — 378 tests, entirely offline. They cover the
 primitives (robust scale, sliding features, threshold segmentation, bipolar
 pairing), the detectors (hot channels found, events are oscillations, a flat
 channel yields nothing, thresholds behave monotonically, reruns are

@@ -425,3 +425,199 @@ def test_an_unknown_subject_gets_a_caveat_rather_than_an_empty_all_clear():
 
 def test_the_page_defaults_to_the_arm_the_study_pre_specified():
     assert panels.PRIMARY == {"band": "fast_ripple", "scope": "reviewed"}
+
+
+# -- the detector sweep ----------------------------------------------------
+#
+# The Detectors page used to carry the sweep as nine hand-typed rows. Every
+# one of them was right; the sentence beneath them quoted a mean expert
+# fast-ripple count that was wrong in three places at two different values.
+# These tests pin the numbers the page and the docs quote against the files
+# they are quoting, so the next drift fails here instead of on screen.
+
+
+def test_the_committed_sweep_covers_both_bands_and_both_detectors():
+    frame = panels.sweep()
+    assert not frame.empty
+    assert set(frame["band"]) == {"ripple", "fast_ripple"}
+    assert set(frame["detector"]) == {"rms", "line_length"}
+    assert {"precision", "recall", "f1", "detections", "rank_rho",
+            "top5_overlap"} <= set(frame.columns)
+
+
+def test_every_swept_rate_is_a_rate():
+    frame = panels.sweep()
+    for column in ("precision", "recall", "f1"):
+        assert frame[column].between(0.0, 1.0).all(), f"{column} is out of range"
+    assert (frame["detections"] > 0).all()
+    assert frame["top5_overlap"].between(0.0, 5.0).all()
+
+
+def test_detections_fall_as_the_threshold_rises():
+    """A threshold that admitted more events as it tightened would be a bug."""
+    frame = panels.sweep()
+    for _, arm in frame.groupby(["band", "detector"]):
+        ordered = arm.sort_values("threshold_sd")["detections"]
+        assert ordered.is_monotonic_decreasing, "detections rose with the threshold"
+
+
+def test_the_named_thresholds_are_the_ones_the_sweep_actually_picks():
+    """`config.THRESHOLDS` and the committed sweep must not drift apart.
+
+    The presets are the page's and the CLI's shared vocabulary. If a re-run
+    moves an optimum, the name has to move with it or every document quoting
+    "the measured one" is quoting something else.
+    """
+    from onset_hfo.config import THRESHOLDS
+
+    by_rho = panels.operating_points("rank_rho").set_index(["band", "detector"])
+    assert by_rho.loc[("ripple", "rms"), "threshold_sd"] == \
+        THRESHOLDS["interictal-agreement"]
+    assert by_rho.loc[("fast_ripple", "rms"), "threshold_sd"] == \
+        THRESHOLDS["interictal-agreement-fast-ripple"]
+
+    by_f1 = panels.operating_points("f1").set_index(["band", "detector"])
+    assert by_f1.loc[("ripple", "rms"), "threshold_sd"] == \
+        THRESHOLDS["interictal-recall"]
+
+
+def test_the_rms_optima_are_interior_because_the_grid_was_extended_to_make_them_so():
+    """The standard this project already applied to itself, as an assertion."""
+    for criterion in ("rank_rho", "f1"):
+        points = panels.operating_points(criterion).set_index(["band", "detector"])
+        for band in ("ripple", "fast_ripple"):
+            assert not points.loc[(band, "rms"), "at_boundary"], \
+                f"{band} rms peaks on the edge of its grid by {criterion}"
+
+
+def test_a_boundary_optimum_is_reported_rather_than_hidden():
+    """Line length was never extended downwards, and the page has to say so.
+
+    This is not a defect to fix by editing the table -- it is an arm that was
+    not swept far enough, and the page labels it "not yet measured". The test
+    exists so that labelling cannot silently disappear.
+    """
+    points = panels.operating_points("f1").set_index(["band", "detector"])
+    assert points.loc[("ripple", "line_length"), "at_boundary"], \
+        "the one known boundary optimum has moved; the page's warning must follow it"
+
+
+def test_the_sweep_grid_records_that_the_arms_do_not_share_one():
+    grid = panels.sweep_grid().set_index(["band", "detector"])
+    assert grid.loc[("ripple", "rms"), "lowest"] == 1.0
+    assert grid.loc[("fast_ripple", "rms"), "highest"] == 10.0
+    assert grid.loc[("ripple", "line_length"), "lowest"] == 2.0, \
+        "line length was never extended downwards; the page says so"
+
+
+def test_the_reference_counts_are_committed_and_match_the_published_totals():
+    """The number that was wrong in three places, now with a file behind it."""
+    cohort = panels.benchmark_cohort()
+    assert len(cohort) == 20
+    assert int(cohort["n_expert_events"].sum()) == 41_187
+    assert int(cohort["expert_ripples"].sum()) == 35_620
+    assert int(cohort["expert_fast_ripples"].sum()) == 5_567
+    assert (cohort["expert_ripples"] + cohort["expert_fast_ripples"]
+            == cohort["n_expert_events"]).all(), "the bands do not sum to the total"
+
+
+def test_the_expert_fast_ripple_mean_the_docs_quote_is_the_one_on_disk():
+    """`docs/EVALUATION.md` said 228 and `config.py` said ~70. It is 278."""
+    cohort = panels.benchmark_cohort()
+    assert round(float(cohort["expert_fast_ripples"].mean())) == 278
+    assert round(float(cohort["expert_ripples"].mean())) == 1781
+
+    evaluation = (Path(__file__).resolve().parents[1] / "docs" / "EVALUATION.md").read_text()
+    assert "mean of 278 expert-marked fast ripples" in evaluation
+    assert "228 expert-marked" not in evaluation
+
+
+def test_the_reviewed_channel_range_the_page_prints_is_the_one_on_disk():
+    cohort = panels.benchmark_cohort()
+    assert int(cohort["n_reviewed_channels"].min()) == 6
+    assert int(cohort["n_reviewed_channels"].max()) == 65
+    assert (cohort["n_reviewed_channels"] <= cohort["n_channels"]).all()
+
+
+def test_the_sweep_is_empty_rather_than_raising_when_the_extract_is_gone(monkeypatch,
+                                                                        tmp_path):
+    monkeypatch.setattr(panels, "BENCHMARK", tmp_path)
+    assert panels.sweep().empty
+    assert panels.benchmark_cohort().empty
+    assert panels.operating_points().empty
+    assert panels.sweep_grid().empty
+
+
+# -- the four things that must stay in step with berdakh/onset --------------
+#
+# DUPLICATION.md item 5 and item 8. Nothing can enforce a convention across two
+# repositories, but the half that lives in this one can be enforced here: the
+# banner must be built from the canonical constants rather than from a fourth
+# copy of the sentence, and the wording the plan quotes must be the wording the
+# code ships. A checklist the code already contradicts is worse than none.
+
+
+def _duplication_plan() -> str:
+    return (Path(__file__).resolve().parents[1] / "docs" / "DUPLICATION.md").read_text()
+
+
+def test_the_disclaimer_is_assembled_from_the_canonical_constants():
+    """No page may carry a second copy of the sentence that matters most."""
+    from app import common
+
+    source = (Path(__file__).resolve().parents[1] / "app" / "common.py").read_text()
+    assert source.count(common.DISCLAIMER_LEAD) == 1, \
+        "the banner restates the disclaimer instead of using DISCLAIMER_LEAD"
+    assert "{DISCLAIMER_LEAD}" in source and "{DATA_SENTENCE}" in source, \
+        "the banner does not interpolate the canonical constants"
+
+
+def test_the_disclaimer_still_says_there_is_no_recommendation():
+    """The one sentence this whole product is organised around."""
+    from app import common
+
+    whole = f"{common.DISCLAIMER_LEAD} {common.DATA_SENTENCE} {common.DISCLAIMER_TAIL}"
+    assert "not a medical device" in whole
+    assert "no recommendation anywhere in this product" in whole
+    assert "the clinician decides" in whole
+
+
+def test_the_duplication_plan_quotes_the_wording_the_code_ships():
+    """The plan is the other repository's only source for this text."""
+    from app import common
+
+    plan = _duplication_plan()
+    assert common.DATA_SENTENCE in plan, \
+        "DUPLICATION.md quotes a DATA_SENTENCE the app no longer uses"
+    assert "There is no " in common.DISCLAIMER_TAIL
+
+
+def test_the_plan_records_which_half_of_each_item_is_done():
+    """Items 5-8 have two halves; a plan that said "done" would be wrong."""
+    plan = _duplication_plan()
+    assert plan.count("**half done**") == 4, \
+        "items 5-8 each need both halves tracked separately"
+    assert "the `onset-hfo` side is in place and the `berdakh/onset`\nside is not" in plan
+
+
+def test_the_theme_file_names_its_twin():
+    theme = Path(__file__).resolve().parents[2] / ".streamlit" / "config.toml"
+    assert theme.exists()
+    assert "TWIN FILE" in theme.read_text()
+
+
+def test_the_contributing_notes_carry_the_four_item_checklist():
+    notes = (Path(__file__).resolve().parents[1] / "docs" / "CONTRIBUTING.md").read_text()
+    assert "stay in step with" in notes
+    for item in ("DATA_SENTENCE", ".streamlit/config.toml", "Architecture"):
+        assert item in notes, f"the checklist does not name {item}"
+
+
+def test_the_sidebar_opens_with_the_four_shared_destinations_in_order():
+    """Checklist item 3, which item 3 of the plan says is done."""
+    source = (Path(__file__).resolve().parents[1] / "app" / "common.py").read_text()
+    names = ["Clinical guide", "Implementation walkthrough", "Results & docs",
+             "Onset project"]
+    positions = [source.index(f"[{name}]") for name in names]
+    assert positions == sorted(positions), \
+        "the shared link row is out of order; the two apps must match"

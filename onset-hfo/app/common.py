@@ -20,6 +20,30 @@ import streamlit as st  # noqa: E402
 from app.panels import EXAMPLE, STUDIES, analyses  # noqa: E402,F401
 from onset_hfo.store import ResultStore  # noqa: E402
 
+# --------------------------------------------------------------------------
+# The standing disclaimer -- the canonical copy
+# --------------------------------------------------------------------------
+#
+# DUPLICATION.md item 5. The same disclaimer is shown by berdakh/onset's
+# app/common.py. This is the copy of record: the structure below is fixed, and
+# the *only* part the teaching prototype changes is DATA_SENTENCE, because it
+# runs on a synthetic cohort and must not claim otherwise. If you edit anything
+# but DATA_SENTENCE here, edit the twin too -- see docs/DUPLICATION.md, which
+# carries both wordings side by side so neither has to be reconstructed.
+
+#: Fixed. Names the thing and refuses the category, in that order.
+DISCLAIMER_LEAD = "Research prototype — not a medical device."
+
+#: The one line that legitimately differs between the two apps.
+DATA_SENTENCE = ("Real public recordings, real expert markings, real surgical "
+                 "outcomes — and nothing here is validated for clinical use.")
+
+#: Fixed. The evidence rule, then the sentence that matters most: the product
+#: contains no recommendation, as against containing one that is hedged.
+DISCLAIMER_TAIL = ("Every number cites the window it came from. There is no "
+                   "recommendation anywhere in this product; the clinician "
+                   "decides.")
+
 
 def banner() -> None:
     """The line that has to be on every page, and the shared sidebar row."""
@@ -37,10 +61,7 @@ def banner() -> None:
     st.markdown(
         "<div style='background:#FDF6E6;color:#8A5A00;border:1px solid #EFDCAE;"
         "padding:8px 14px;border-radius:8px;font-size:13px'>"
-        "<b>Research prototype — not a medical device.</b> Real public recordings, "
-        "real expert markings, real surgical outcomes — and nothing here is validated "
-        "for clinical use. Every number cites the window it came from. "
-        "There is no recommendation anywhere in this product; the clinician decides."
+        f"<b>{DISCLAIMER_LEAD}</b> {DATA_SENTENCE} {DISCLAIMER_TAIL}"
         "</div>", unsafe_allow_html=True)
 
 

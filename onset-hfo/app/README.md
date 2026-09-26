@@ -9,9 +9,17 @@ pip install -e ".[app]"
 streamlit run app/Home.py
 ```
 
-Works on a fresh clone with **no download**: a real 60-second analysis ships in
-`data/example_analysis/`, the group results read tables committed to
-`data/stability/`, and the per-patient screen reads `data/outcome/`.
+Works on a fresh clone with **no download**. Every page reads a committed
+file: a real 60-second analysis in `data/example_analysis/`, the group results
+in `data/stability/`, the per-patient screen in `data/outcome/`, and the
+detector sweep in `data/benchmark/`.
+
+**No page restates a number it could read.** `4_Detectors` carried the sweep as
+nine hand-typed rows until it didn't; all nine were right, and the sentence
+under them quoted an expert-event count that was wrong in three places at two
+different values. The rule now is that a table on a page comes from a file, and
+the one table that doesn't — the synthetic-truth scores, which `evaluate`
+regenerates from a seed in seconds — says so on the page.
 
 ## Deploying it on Streamlit Community Cloud
 

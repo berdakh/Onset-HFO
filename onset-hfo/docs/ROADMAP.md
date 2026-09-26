@@ -46,7 +46,9 @@ numbers, which measure the script rather than the thesis.
 
 Not on this list, because they live in their own documents with their own
 ordered plans: the two-repository cleanup
-([`DUPLICATION.md`](DUPLICATION.md), items 4–8) and the expo material
+([`DUPLICATION.md`](DUPLICATION.md) — items 5–8 are done on this side and
+wait only on `berdakh/onset`, with the exact text for each written out there;
+item 4 is entirely in that repository) and the expo material
 ([`EXPO.md`](EXPO.md), [`POSTER.md`](POSTER.md) — the claim is written, the
 board is not built).
 
@@ -368,10 +370,27 @@ caught it (`test_every_patient_is_either_clean_or_carries_a_reason`, which
 asserts that an empty caveat list means the checks *passed* rather than that a
 join dropped a row) is the part worth keeping.
 
-**What is still left.** The benchmark sweep has no screen of its own —
-`4_Detectors` quotes its numbers as a static table rather than reading
-`data/benchmark/agreement_sweep.csv`. That is small and worth doing the next
-time that page is touched.
+**The benchmark screen, added next.** `4_Detectors` now reads
+`data/benchmark/` rather than restating it: the full sweep for all four arms,
+a curve for any metric, and the best threshold per arm *derived* from the
+table with an `at_boundary` flag beside it. A test asserts that the derived
+optima are the values `config.THRESHOLDS` names, so a re-run that moves an
+optimum fails in CI instead of leaving every document quoting a preset that no
+longer matches.
+
+**What that caught, which is the argument for the whole exercise.** The nine
+hand-typed rows on the old page were all correct. The sentence beneath them
+was not: it quoted the mean expert fast-ripple count as 228, `config.py`
+quoted it as ~70 — which is this detector's own detection count at 5.0 SD, not
+the expert count at all — and the true value is 278. Three copies of a number
+that lived only in untracked `artifacts/`, two of them wrong, none of them
+checkable from a clone. `data/benchmark/cohort.csv` now carries the
+per-subject reference counts, and the page reads them.
+
+Surfaced by the same change: the ripple line-length arm's F1 optimum sits on
+the *lowest* threshold swept, so it is not an optimum — that arm was never
+extended downwards the way the RMS arms were. The page labels it "not yet
+measured" rather than reporting it as a detector that lost.
 
 **Touches.** `app/`, reusing `onset_hfo/store.py`, `viz.py` and `metrics.py`.
 

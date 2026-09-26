@@ -50,10 +50,19 @@ STUDIES = PROJECT_ROOT / "data" / "stability"
 #: Group means are what a paper reports; a clinician asks about a patient.
 COHORT = PROJECT_ROOT / "data" / "outcome"
 
+#: The detector threshold sweep against expert markings, and the per-subject
+#: reference counts it was scored against.
+BENCHMARK = PROJECT_ROOT / "data" / "benchmark"
+
 __all__ = [
     "EXAMPLE",
     "STUDIES",
     "COHORT",
+    "BENCHMARK",
+    "sweep",
+    "sweep_grid",
+    "benchmark_cohort",
+    "operating_points",
     "cohort_table",
     "cohort_overview",
     "subject_metrics",
@@ -454,3 +463,90 @@ def subject_caveats(subject: str, band: str = PRIMARY["band"],
         notes.append(f"Contacts the clinical sheet lists but the parser could not "
                      f"resolve: {missing}.")
     return notes
+
+
+# --------------------------------------------------------------------------
+# The detector sweep: what the page shows instead of a transcription
+# --------------------------------------------------------------------------
+#
+# This section exists because `4_Detectors` used to carry the sweep as a
+# hand-typed table of nine rows. Every number in it was right, and the page
+# beside it still quoted a *tenth* number -- the mean expert fast-ripple count
+# -- that was wrong in three places at once. A transcription that is correct
+# today is a number with no owner; these functions give the page the file.
+
+
+def sweep() -> pd.DataFrame:
+    """The committed threshold sweep, or an empty frame if it is absent.
+
+    One row per band x detector x threshold: agreement with the expert HFO
+    markings of ds003498, cohort means over 20 subjects. ``precision`` is
+    agreement, never accuracy -- the reference is another detector's validated
+    output, so an event we find that it never proposed counts against us
+    whether or not it is real.
+    """
+    path = BENCHMARK / "agreement_sweep.csv"
+    return pd.read_csv(path) if path.exists() else pd.DataFrame()
+
+
+def benchmark_cohort() -> pd.DataFrame:
+    """Per-subject reference counts: what the sweep above was scored against.
+
+    Committed so that a claim about *how many* expert events there were can be
+    checked from a clone, rather than transcribed from an untracked artifact
+    and then quoted at three different values.
+    """
+    path = BENCHMARK / "cohort.csv"
+    return pd.read_csv(path) if path.exists() else pd.DataFrame()
+
+
+def sweep_grid(frame: pd.DataFrame | None = None) -> pd.DataFrame:
+    """What was actually swept, per arm -- the context a single row hides.
+
+    The four arms were not swept over the same grid: the ripple RMS arm runs
+    down to 1.0 SD and the fast-ripple RMS arm up to 10.0, because each was
+    extended when its first optimum landed on a boundary. Line length was
+    never extended either way. A reader comparing detectors needs to know
+    that, or "line length is worse" reads as a measurement when part of it is
+    a grid that stops sooner.
+    """
+    frame = sweep() if frame is None else frame
+    if frame.empty:
+        return frame
+    grid = (frame.groupby(["band", "detector"])["threshold_sd"]
+            .agg(n_points="count", lowest="min", highest="max")
+            .reset_index())
+    return grid.sort_values(["band", "detector"]).reset_index(drop=True)
+
+
+def operating_points(by: str = "rank_rho") -> pd.DataFrame:
+    """The best threshold for each arm, and whether the grid actually found it.
+
+    ``at_boundary`` is the column that matters. An optimum sitting on the edge
+    of the swept range is not an optimum -- it is the grid running out, and
+    this project has already been wrong that way once: the first ripple sweep
+    stopped at 2.0 SD and reported 2.0 as the answer, which is why the
+    committed table now runs down to 1.0.
+    """
+    frame = sweep()
+    if frame.empty or by not in frame.columns:
+        return pd.DataFrame()
+    rows = []
+    for (band, detector), part in frame.groupby(["band", "detector"]):
+        part = part.sort_values("threshold_sd")
+        best = part.loc[part[by].idxmax()]
+        threshold = float(best["threshold_sd"])
+        rows.append({
+            "band": band,
+            "detector": detector,
+            "threshold_sd": threshold,
+            by: float(best[by]),
+            "precision": float(best["precision"]),
+            "recall": float(best["recall"]),
+            "f1": float(best["f1"]),
+            "detections": float(best["detections"]),
+            "at_boundary": threshold in (float(part["threshold_sd"].min()),
+                                         float(part["threshold_sd"].max())),
+        })
+    return (pd.DataFrame(rows).sort_values(["band", "detector"])
+            .reset_index(drop=True))
