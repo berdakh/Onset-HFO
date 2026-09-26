@@ -22,11 +22,17 @@ from onset_hfo.store import ResultStore  # noqa: E402
 
 
 def banner() -> None:
-    """The line that has to be on every page, and the tutorial link."""
+    """The line that has to be on every page, and the shared sidebar row."""
     st.sidebar.markdown(
-        "[Tutorial](https://berdakh.github.io/onset/tutorial.html) · "
+        # The first four entries are the shared link row: same names, same
+        # order, in this app and in the teaching prototype's. See
+        # docs/DUPLICATION.md. The last two necessarily differ -- they point
+        # at the other instrument and at this repository's code.
+        "[Clinical guide](https://berdakh.github.io/onset/clinical-guide.html) · "
+        "[Implementation walkthrough](https://berdakh.github.io/onset/tutorial.html) · "
         "[Results & docs](https://berdakh.github.io/onset-hfo/) · "
         "[Onset project](https://berdakh.github.io/onset/) · "
+        "[Teaching prototype](https://berdakh-onset.streamlit.app/) · "
         "[Code](https://github.com/berdakh/onset-hfo)")
     st.markdown(
         "<div style='background:#FDF6E6;color:#8A5A00;border:1px solid #EFDCAE;"
