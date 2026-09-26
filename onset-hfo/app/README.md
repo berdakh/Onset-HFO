@@ -9,6 +9,54 @@ Works on a fresh clone with **no download**: a real 60-second analysis ships in
 `data/example_analysis/`, and the cohort studies read tables committed to
 `data/stability/`.
 
+## Deploying it on Streamlit Community Cloud
+
+The repository is already set up for it. At <https://share.streamlit.io>, with
+your GitHub account connected:
+
+| field | value |
+|---|---|
+| Repository | `berdakh/onset-hfo` |
+| Branch | `master` |
+| **Main file path** | **`onset-hfo/app/Home.py`** |
+| App URL | your choice, e.g. `berdakh-onset-hfo` |
+
+That is the whole configuration. The path is the one thing that catches
+people: the Python project lives in a subdirectory, so the entrypoint is
+`onset-hfo/app/Home.py`, not `app/Home.py`.
+
+**What makes it work without any further setup:**
+
+- `requirements.txt` sits at the **repository root**, where Streamlit Cloud
+  looks for it. It was verified by building a clean virtual environment from
+  that file alone and launching the app in it.
+- It deliberately does **not** install the `onset-hfo` package. The app puts
+  `onset-hfo/` on `sys.path` and imports from source, so a deploy always runs
+  the code on the branch you pointed it at.
+- `.streamlit/config.toml` at the root carries the theme.
+- No secrets are needed, and there is nothing to configure in Advanced
+  settings. Any Python from 3.10 up works.
+
+**Four things worth knowing before you deploy:**
+
+1. **The assistant runs its scripted backend.** There is no local model on
+   Community Cloud, so the Ollama option on that page will fail if selected.
+   The scripted backend needs no model and exercises the same guards — the
+   refusal demo works. For a real model you would point the
+   OpenAI-compatible backend at a hosted endpoint and put the URL and key in
+   Streamlit's secrets.
+2. **The first evidence window costs a 24 MB download.** The app fetches the
+   recording from OpenNeuro on demand and caches it for the session. Every
+   other page works with no download at all.
+3. **If the deploy runs out of memory**, drop `mne` and `requests` from
+   `requirements.txt`. They are needed *only* for redrawing a signal window;
+   everything else keeps working and the page says why the figure is missing
+   rather than crashing. They are also the bulk of the install.
+4. **A Community Cloud app is public.** That is fine here — both archives are
+   CC0 and already de-identified. Never point a public deploy at identifiable
+   recordings; this prototype has no authentication, no audit log and no
+   security model.
+
 ## Same pages as the Onset prototype, real data underneath
 
 This mirrors the page order of [`berdakh/onset`](https://github.com/berdakh/onset)

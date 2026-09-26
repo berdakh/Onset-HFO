@@ -1,0 +1,11 @@
+# Matches the Onset prototype's theme so the two deployed apps look like one
+# project. Streamlit Community Cloud reads this from the repository root.
+[theme]
+base = "light"
+primaryColor = "#534AB7"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F7F6F2"
+textColor = "#2C2C2A"
+
+[server]
+headless = true
