@@ -1,0 +1,24 @@
+# Dependencies for the Streamlit app at onset-hfo/app/Home.py.
+#
+# Streamlit Community Cloud installs from this file at the repository root.
+# It deliberately does NOT install the onset-hfo package: the app adds
+# onset-hfo/ to sys.path and imports from source, so a deploy always runs the
+# code in the branch you pointed it at.
+#
+# Verified by creating a clean environment from this file and launching the
+# app in it -- see app/README.md.
+
+# width="stretch" on st.dataframe/st.pyplot; verified on 1.64.
+streamlit>=1.64
+
+# The read-only result store, the tables and the figures.
+pandas>=2.1
+numpy>=1.26,<3
+matplotlib>=3.8
+scipy>=1.11
+
+# Only for redrawing a signal window live: the app fetches the recording from
+# OpenNeuro on demand. Everything else works without these, and the page says
+# so rather than failing, so drop them if the deploy runs short of memory.
+mne>=1.6
+requests>=2.31

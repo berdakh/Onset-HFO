@@ -15,7 +15,7 @@ justifies claiming. It is self-contained — one file, no build step.
 
 ```bash
 pip install -e ".[app]"
-streamlit run app/onset_app.py
+streamlit run app/Home.py
 ```
 
 The reading interface: a saved analysis on a page, where a rate leads to the

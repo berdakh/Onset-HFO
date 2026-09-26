@@ -43,27 +43,48 @@ def _record(row: pd.Series, keys: list[str]) -> dict:
     return {k: _clean(row[k]) for k in keys if k in row}
 
 
+def _table_path(directory: Path, name: str) -> Path | None:
+    """``name`` or its gzipped twin, whichever exists.
+
+    A minute of real recording produces an ``events.csv`` of roughly a
+    megabyte, which is fine on disk and wasteful in a repository. Accepting
+    ``.csv.gz`` lets a worked example ship with the source -- pandas reads it
+    transparently -- without the pipeline having to write a second format.
+    """
+    for candidate in (directory / name, directory / f"{name}.gz"):
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def _read_table(directory: Path, name: str) -> pd.DataFrame:
+    """An optional table, empty when it was never written."""
+    path = _table_path(directory, name)
+    return pd.read_csv(path) if path is not None else pd.DataFrame()
+
+
 class ResultStore:
     """Load and query one saved analysis."""
 
     def __init__(self, directory: str | Path):
         self.dir = Path(directory)
-        if not (self.dir / "events.csv").exists():
+        events = _table_path(self.dir, "events.csv")
+        if events is None:
             raise FileNotFoundError(
                 f"{self.dir} does not look like a saved analysis "
                 "(no events.csv). Run the pipeline with save_to=... first.")
-        self.events = pd.read_csv(self.dir / "events.csv")
+        self.events = pd.read_csv(events)
         self.provenance = json.loads((self.dir / "provenance.json").read_text())
         self.report = json.loads((self.dir / "report.json").read_text())
         self.config = json.loads((self.dir / "config.json").read_text())
         self.agreement = json.loads((self.dir / "agreement.json").read_text()) \
             if (self.dir / "agreement.json").exists() else {}
-        self.comparison = pd.read_csv(self.dir / "comparison.csv") \
-            if (self.dir / "comparison.csv").exists() else pd.DataFrame()
-        self.rate_change = pd.read_csv(self.dir / "rate_change.csv") \
-            if (self.dir / "rate_change.csv").exists() else pd.DataFrame()
-        self.rates = {p.stem.replace("rates_", ""): pd.read_csv(p)
-                      for p in sorted(self.dir.glob("rates_*.csv"))}
+        self.comparison = _read_table(self.dir, "comparison.csv")
+        self.rate_change = _read_table(self.dir, "rate_change.csv")
+        self.rates = {}
+        for path in sorted(self.dir.glob("rates_*.csv*")):
+            name = path.name.removeprefix("rates_").removesuffix(".gz").removesuffix(".csv")
+            self.rates[name] = pd.read_csv(path)
         self.events["evidence_id"] = [
             self.make_evidence_id(r.channel, r.detector, r.start)
             for r in self.events.itertuples()]

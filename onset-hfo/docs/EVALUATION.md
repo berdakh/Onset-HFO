@@ -127,7 +127,8 @@ The short version, on whole 300-second runs: expert markings, fast-ripple
 band, the busiest channel was inside the resection in 11 of 13 seizure-free
 patients and 3 of 7 recurrences (AUC 0.71, p = 0.12); our detector on the same
 channels, 10 of 13 versus 3 of 7 (AUC 0.67, p = 0.17). Nothing reaches
-p < 0.05.
+p < 0.05 after correction; one of 36 uncorrected comparisons reaches 0.034,
+which is fewer than chance produces.
 
 **The number that matters is the one that moved.** On the first 60 seconds of
 the same recordings the expert arm gave AUC 0.82, p = 0.007 — and that is what

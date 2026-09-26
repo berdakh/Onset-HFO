@@ -76,7 +76,7 @@ not reach significance on the same metric** (AUC 0.70, p = 0.13).
 than the gap.** Re-running on whole 300-second runs instead of the first 60
 seconds moved the expert arm from AUC 0.82 (p = 0.007) to 0.71 (p = 0.12) and
 ours from 0.70 to 0.67 — the gap closed because the *expert* number came down,
-not because ours went up, and now nothing in the study reaches p < 0.05. Two
+not because ours went up, and nothing in the study survives correction. Two
 patients account for all of it.
 
 So the top open item is **not** "make the detector better", it is
@@ -258,7 +258,7 @@ and two verifiers with a measured delta between them. See
 
 ## 9. Interface — *done*
 
-**Status.** `app/` — `streamlit run app/onset_app.py`, installed with
+**Status.** `app/` — `streamlit run app/Home.py`, installed with
 `pip install -e ".[app]"`. Five tabs: ranking (with intervals and the "does
 anything stand out?" verdict above the table), evidence (a channel's citable
 events and the three-panel figure for the one you pick), disagreements (both
