@@ -46,9 +46,19 @@ EXAMPLE = PROJECT_ROOT / "data" / "example_analysis"
 #: download and no 90-minute rerun.
 STUDIES = PROJECT_ROOT / "data" / "stability"
 
+#: The outcome study's **per-subject** tables, committed for the same reason.
+#: Group means are what a paper reports; a clinician asks about a patient.
+COHORT = PROJECT_ROOT / "data" / "outcome"
+
 __all__ = [
     "EXAMPLE",
     "STUDIES",
+    "COHORT",
+    "cohort_table",
+    "cohort_overview",
+    "subject_metrics",
+    "subject_channels",
+    "subject_caveats",
     "analyses",
     "find_results",
     "detector_band",
@@ -272,3 +282,175 @@ def reload_spec(store: ResultStore) -> dict | None:
         "t_start": float(window[0]),
         "t_stop": float(window[1]),
     }
+
+
+# --------------------------------------------------------------------------
+# The cohort: one row per patient, rather than one row per group
+# --------------------------------------------------------------------------
+
+#: The comparison the outcome study pre-specified, and the one every
+#: per-subject view below defaults to. Named once so a page cannot quietly
+#: show a different arm than the tables it sits next to.
+PRIMARY = {"band": "fast_ripple", "scope": "reviewed"}
+
+
+def cohort_table(name: str) -> pd.DataFrame:
+    """One committed per-subject table, or an empty frame if it is absent.
+
+    Absence is normal on a clone that has not run the outcome study and has
+    not got the committed extract either; the page says so rather than
+    raising.
+    """
+    for candidate in (COHORT / name, COHORT / f"{name}.gz"):
+        if candidate.exists():
+            return pd.read_csv(candidate)
+    return pd.DataFrame()
+
+
+def cohort_overview(band: str = PRIMARY["band"], scope: str = PRIMARY["scope"]) -> pd.DataFrame:
+    """One row per patient: who they were, what was removed, what we found.
+
+    Joins the four committed tables that describe a subject -- the archive's
+    participants sidecar, the per-recording summary, the per-subject metrics,
+    and the two stability studies -- into the table a clinician would actually
+    ask for. Every column is read from disk; nothing here is recomputed.
+
+    ``rz_coverage`` is carried deliberately. In five temporal-lobe subjects
+    only a quarter of the listed resected contacts were recorded, so their
+    "share inside the resection" describes a quarter of their resection, and a
+    view that hid that would be inviting the reader to over-read those rows.
+    """
+    participants = cohort_table("participants.csv")
+    recordings = cohort_table("recordings.csv")
+    subjects = cohort_table("subjects.csv")
+    if participants.empty or subjects.empty:
+        return pd.DataFrame()
+
+    frame = participants.merge(
+        recordings[["subject", "n_channels", "n_reviewed", "n_resected_channels",
+                    "rz_coverage", "n_expert_events"]],
+        on="subject", how="left")
+
+    arm = subjects[(subjects["band"] == band) & (subjects["scope"] == scope)]
+    for source in ("expert", "rms"):
+        part = arm[arm["source"] == source][
+            ["subject", "top_channel_resected", "n_candidates",
+             "candidates_resected", "share_in_rz"]]
+        frame = frame.merge(part.rename(columns={
+            "top_channel_resected": f"top_resected_{source}",
+            "n_candidates": f"n_candidates_{source}",
+            "candidates_resected": f"candidates_resected_{source}",
+            "share_in_rz": f"share_in_rz_{source}",
+        }), on="subject", how="left")
+
+    windows = _stability_column("decision_stability.csv", "stable_across_windows")
+    runs = _stability_column("decision_stability_across_runs.csv", "stable_across_runs")
+    for part in (windows, runs):
+        if not part.empty:
+            frame = frame.merge(part, on="subject", how="left")
+
+    frame["seizure_free"] = frame["outcome"].map({"S": True, "F": False})
+    return frame.sort_values("subject").reset_index(drop=True)
+
+
+def _stability_column(table: str, prefix: str) -> pd.DataFrame:
+    """Per-subject ``stable`` flags from one stability table, one column per arm."""
+    import pandas as _pd
+
+    path = STUDIES / table
+    if not path.exists():
+        return _pd.DataFrame()
+    frame = _pd.read_csv(path)
+    if "metric" in frame.columns:
+        frame = frame[frame["metric"] == "top_channel_resected"]
+    wide = frame.pivot_table(index="subject", columns="source", values="stable",
+                             aggfunc="first")
+    wide.columns = [f"{prefix}_{c}" for c in wide.columns]
+    return wide.reset_index()
+
+
+def subject_metrics(subject: str) -> pd.DataFrame:
+    """Every metric computed for one patient, across both bands and both arms.
+
+    The group tables answer "does this work?". This answers "what happened to
+    this patient?", which is the question a clinician asks and the one the
+    project could not previously show.
+    """
+    subjects = cohort_table("subjects.csv")
+    if subjects.empty:
+        return subjects
+    rows = subjects[subjects["subject"] == subject]
+    return rows.sort_values(["band", "scope", "source"]).reset_index(drop=True)
+
+
+def subject_channels(subject: str, band: str = PRIMARY["band"],
+                     reviewed_only: bool = True) -> pd.DataFrame:
+    """One patient's channels: which zone each sits in, and how busy it was.
+
+    This is the row-level evidence under a per-patient claim. A channel is
+    ``resected`` when both of its contacts were removed, ``partial`` when one
+    was, and ``spared`` when neither was -- so a "partial" channel is the one
+    a reader should look at hardest before believing either answer.
+    """
+    channels = cohort_table("channels.csv")
+    if channels.empty:
+        return channels
+    rows = channels[(channels["subject"] == subject) & (channels["band"] == band)]
+    if reviewed_only and "reviewed" in rows.columns:
+        rows = rows[rows["reviewed"]]
+    return rows.sort_values("expert_events", ascending=False).reset_index(drop=True)
+
+
+def _is_false(value) -> bool:
+    """``value`` is present and falsy -- as against absent, which is not "stable"."""
+    return bool(pd.notna(value)) and not bool(value)
+
+
+def subject_caveats(subject: str, band: str = PRIMARY["band"],
+                    scope: str = PRIMARY["scope"]) -> list[str]:
+    """Everything about this patient that should stop a reader over-reading them.
+
+    Returned as plain sentences rather than flags, because the page that shows
+    a per-patient answer is exactly where a caveat has to be unmissable. An
+    empty list means the four checks below found nothing, not that the row is
+    safe to act on -- the study is underpowered for every patient in it.
+    """
+    notes: list[str] = []
+    overview = cohort_overview(band=band, scope=scope)
+    if overview.empty or subject not in set(overview["subject"]):
+        return ["No committed cohort tables for this subject."]
+    row = overview[overview["subject"] == subject].iloc[0]
+
+    coverage = row.get("rz_coverage")
+    if pd.notna(coverage) and coverage < 1.0:
+        notes.append(
+            f"Only {coverage:.0%} of the contacts listed as resected were actually "
+            f"recorded, so any 'share inside the resection' for this patient "
+            f"describes {coverage:.0%} of their resection.")
+
+    for source, arm in (("expert", "expert"), ("rms", "RMS")):
+        n = row.get(f"n_candidates_{source}")
+        if pd.notna(n) and n > 1:
+            notes.append(
+                f"The {arm} arm could not separate the busiest channel from "
+                f"{int(n) - 1} other{'s' if n > 2 else ''}: its rate interval "
+                f"overlaps theirs, so 'the busiest channel' names one of {int(n)}.")
+        # ``is False`` would be wrong here and silently so: pandas hands back
+        # ``numpy.bool_(False)``, which is not the ``False`` singleton, so an
+        # identity test leaves an unstable patient uncaveated. The test named
+        # ``test_every_patient_is_either_clean_or_carries_a_reason`` exists
+        # because this page shipped that bug once.
+        if _is_false(row.get(f"stable_across_windows_{source}")):
+            notes.append(
+                f"The {arm} arm's inside/outside answer changed between the five "
+                f"one-minute windows of this recording.")
+        if _is_false(row.get(f"stable_across_runs_{source}")):
+            notes.append(
+                f"The {arm} arm's answer changed between this patient's "
+                f"recordings on different nights.")
+
+    missing = row.get("missing")
+    if isinstance(missing, str) and missing.strip():
+        notes.append(f"Contacts the clinical sheet lists but the parser could not "
+                     f"resolve: {missing}.")
+    return notes

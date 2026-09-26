@@ -10,8 +10,8 @@ streamlit run app/Home.py
 ```
 
 Works on a fresh clone with **no download**: a real 60-second analysis ships in
-`data/example_analysis/`, and the cohort studies read tables committed to
-`data/stability/`.
+`data/example_analysis/`, the group results read tables committed to
+`data/stability/`, and the per-patient screen reads `data/outcome/`.
 
 ## Deploying it on Streamlit Community Cloud
 
@@ -102,6 +102,26 @@ recording is fetched again only so the window can be seen. Nothing is
 re-detected, and `panels.event_from_record` carries every stored field into the
 figure so its subtitle cannot disagree with the table above it.
 
+## The cohort, at two grains
+
+`5_Outcome` reports the study as a paper would: one row per
+band × scope × source × metric, with an AUC, a permutation p and a Bonferroni
+column. `6_Patients` reports the *same study* at the grain a clinician asks
+about — one row per patient, both sources beside each other, and every caveat
+that applies to that patient spelled out as a sentence above the numbers.
+
+The caveats are computed, not written: resection coverage below 1, a tie set
+larger than one channel, an answer that changed between the five minutes of a
+run, and an answer that changed between nights. Five of the twenty patients
+trip none of them. An empty caveat list therefore has to mean *the checks
+passed* and never *a join dropped this row*, which is what
+`test_every_patient_is_either_clean_or_carries_a_reason` enforces — see
+`docs/ROADMAP.md` §9 for the bug that test was written after.
+
+It is called `Patients` rather than `Cohort` because `data/cohort/` already
+holds the ds003029 feature table for the learned model, and a page named after
+the wrong directory is a trap for the next reader.
+
 ## Three things it deliberately does not do
 
 - **No recommendation.** Not an empty panel, not a greyed-out button: the
@@ -119,7 +139,7 @@ app/
   panels.py         everything the page decides — imports no Streamlit, so it is tested
   signal.py         the one place the interface touches the recording again
   pages/            1_Recording · 2_Report · 3_Assistant · 4_Detectors
-                    5_Outcome · 6_Data · 7_Architecture · 8_Research
+                    5_Outcome · 6_Patients · 7_Data · 8_Architecture · 9_Research
 ```
 
 ## Offline and non-archive analyses

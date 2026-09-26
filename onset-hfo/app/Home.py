@@ -48,9 +48,10 @@ decides. **There is no recommendation anywhere in this product.**
 3. **Assistant** — ask about a channel or the evidence; try asking what to resect.
 4. **Detectors** — how they score against expert markings: precision, recall, channel-rank agreement, and the operating point the data prefers.
 5. **Outcome** — did the HFO map point at the tissue whose removal cured the patient? Including the two results that did *not* hold up.
-6. **Data** — the two archives, what each one carries, and how 24 MB is downloaded instead of 105 MB.
-7. **Architecture** — every component, and which ones this prototype includes.
-8. **Research** — the lab, the measured state of the work, and what is open.
+6. **Patients** — the same outcome study one patient at a time, with the caveats that apply to each of them.
+7. **Data** — the two archives, what each one carries, and how 24 MB is downloaded instead of 105 MB.
+8. **Architecture** — every component, and which ones this prototype includes.
+9. **Research** — the lab, the measured state of the work, and what is open.
 """)
 
 scores = study("outcome_groups_300s.csv")

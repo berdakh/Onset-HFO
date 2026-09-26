@@ -12,9 +12,9 @@ most useful thing to read before starting the next one.
 
 ## What is left, in order
 
-Ten numbered items below carry the history — why each mattered, what it found,
-and what it cost. This section is the short answer: **what is still open, and
-which of it is blocked on what.**
+Eleven numbered items below carry the history — why each mattered, what it
+found, and what it cost. This section is the short answer: **what is still
+open, and which of it is blocked on what.**
 
 | | Open work | State | Blocked on |
 |---|---|---|---|
@@ -25,8 +25,7 @@ which of it is blocked on what.**
 | **5** | [A hand-annotated benchmark](#5-a-small-hand-annotated-benchmark) | not started | two reviewers' time |
 | **6** | [Physiological versus epileptic ripples](#6-physiological-versus-epileptic-ripples) | not started | nothing, and it is hard |
 | **7** | [Whole recordings in `run` and `benchmark`](#7-scaling-whole-recordings-instead-of-one-minute-slices--done-for-the-outcome-study) | done for `outcome` only | nothing |
-| **8** | [A cohort screen in the interface](#9-interface--done) | not started | nothing |
-| **9** | [Electrode geometry](#3-electrode-geometry--blocked-on-this-dataset-needs-a-different-archive) | write it against the schema | an archive with coordinates |
+| **8** | [Electrode geometry](#3-electrode-geometry--blocked-on-this-dataset-needs-a-different-archive) | write it against the schema | an archive with coordinates |
 
 **Why #1 is first.** Every orchestration number this project has published
 comes from the deterministic scripted planner, which the docs have called
@@ -353,10 +352,26 @@ background` directly beneath a panel showing 192 Hz and 12.5 dB.
 after the incident. Two numbers disagreeing on one screen is the failure this
 project is organised against, and an interface is where it surfaces.
 
-**What is left.** The cohort studies (benchmark, outcome, stability) have no
-page — the picker skips those directories rather than offering them and
-failing to load. That is the obvious next screen, and it is where the
-project's most interesting output currently lives.
+**The cohort screen, added afterwards.** `5_Outcome` reported the group
+tables; `6_Patients` is the same study at the grain a clinician asks about —
+one row per patient, both sources side by side, and the per-patient caveats
+(resection coverage, tie-set size, window and run stability) computed from
+`data/outcome/` rather than written by hand. Five of the twenty patients trip
+none of the four checks; the other fifteen do, and the page says which.
+
+**What building *that* caught.** `subject_caveats` tested each stability flag
+with `is False`. pandas hands back `numpy.bool_(False)`, which is not the
+`False` singleton, so every unstable patient came back silently uncaveated —
+on the one screen in this project where a missing caveat sits directly beneath
+a single patient's answer. The fix is three lines; the test that would have
+caught it (`test_every_patient_is_either_clean_or_carries_a_reason`, which
+asserts that an empty caveat list means the checks *passed* rather than that a
+join dropped a row) is the part worth keeping.
+
+**What is still left.** The benchmark sweep has no screen of its own —
+`4_Detectors` quotes its numbers as a static table rather than reading
+`data/benchmark/agreement_sweep.csv`. That is small and worth doing the next
+time that page is touched.
 
 **Touches.** `app/`, reusing `onset_hfo/store.py`, `viz.py` and `metrics.py`.
 
